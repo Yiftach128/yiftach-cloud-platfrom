@@ -1,0 +1,35 @@
+{
+    "compilerOptions": {
+        "target": "ES2023",
+        "lib": ["ES2023"],
+        "module": "NodeNext",
+        "moduleResolution": "NodeNext",
+        "types": ["node"],
+
+        "strict": true,
+        "noUncheckedIndexedAccess": true,
+        "noImplicitOverride": true,
+        "noFallthroughCasesInSwitch": true,
+
+        // Node 24 strips types natively, so src runs directly (start/dev). These keep
+        // the source restricted to syntax Node can erase, and let imports use the real
+        // .ts extension that Node resolves at runtime.
+        "erasableSyntaxOnly": true,
+        "allowImportingTsExtensions": true,
+        "verbatimModuleSyntax": true,
+
+        // dockerode is CommonJS and uses `export =`, so a default import needs this.
+        "esModuleInterop": true,
+
+        // `npm run build` emits to dist/, rewriting the .ts import extensions to .js.
+        "outDir": "dist",
+        "rewriteRelativeImportExtensions": true,
+
+        "skipLibCheck": true
+    },
+    "ts-node": {
+        "esm": true,
+        "transpileOnly": true
+    },
+    "include": ["src/**/*.ts"]
+}
