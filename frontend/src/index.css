@@ -1,0 +1,37 @@
+:root {
+    font-family: system-ui, 'Segoe UI', Roboto, sans-serif;
+}
+
+body {
+    margin: 0;
+}
+
+.app-logo {
+    color: rgba(0, 0, 0, 0.88);
+    font-size: 18px;
+    font-weight: 600;
+    padding: 16px;
+    white-space: nowrap;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.app-sider-menu .ant-menu-item {
+    position: relative;
+}
+
+/* Active-route marker: the selected item's only highlight (the theme in main.tsx
+   disables the default blue background). */
+.app-sider-menu .ant-menu-item-selected::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 4px;
+    height: 60%;
+    border-radius: 2px;
+    background-color: #8c8c8c;
+}

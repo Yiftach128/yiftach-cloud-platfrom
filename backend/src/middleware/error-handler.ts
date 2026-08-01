@@ -16,5 +16,11 @@ export const errorHandler: ErrorRequestHandler = (error, _req, res, _next) => {
         res.status(503).json({ message: error.message });
         return;
     }
-    res.status(500).json({ message: error instanceof Error ? error.message : String(error) });
+    let message: string;
+    if (error instanceof Error) {
+        message = error.message;
+    } else {
+        message = String(error);
+    }
+    res.status(500).json({ message: message });
 };

@@ -13,17 +13,31 @@ const DEFAULT_PORT = 2375;
  * Malformed DOCKER_HOST values are ignored rather than thrown, so a stray env var
  * can't break startup.
  */
-function readDockerHostEnv(): { host?: string; port?: number } {
+function readDockerHostEnv(): { host: string | undefined; port: number | undefined } {
     const raw = process.env['DOCKER_HOST'];
-    if (!raw) return {};
+    if (raw === undefined || raw === '') {
+        return { host: undefined, port: undefined };
+    }
     try {
         const url = new URL(raw.replace(/^tcp:\/\//, 'http://'));
-        return {
-            host: url.hostname || undefined,
-            port: url.port ? Number(url.port) : undefined,
-        };
+
+        let host: string | undefined;
+        if (url.hostname === '') {
+            host = undefined;
+        } else {
+            host = url.hostname;
+        }
+
+        let port: number | undefined;
+        if (url.port === '') {
+            port = undefined;
+        } else {
+            port = Number(url.port);
+        }
+
+        return { host: host, port: port };
     } catch {
-        return {};
+        return { host: undefined, port: undefined };
     }
 }
 
@@ -31,10 +45,36 @@ export function resolveDockerEndpoint(
     options: Pick<DockerManagerOptions, 'host' | 'port' | 'protocol' | 'ca' | 'cert' | 'key'> = {},
 ): DockerEndpoint {
     const env = readDockerHostEnv();
-    const host = options.host ?? env.host ?? DEFAULT_HOST;
-    const port = options.port ?? env.port ?? DEFAULT_PORT;
-    const usesTls = Boolean(options.ca ?? options.cert ?? options.key);
-    const protocol = options.protocol ?? (usesTls ? 'https' : 'http');
 
-    return { host, port, protocol, baseUrl: `${protocol}://${host}:${port}` };
+    let host: string;
+    if (options.host !== undefined) {
+        host = options.host;
+    } else if (env.host !== undefined) {
+        host = env.host;
+    } else {
+        host = DEFAULT_HOST;
+    }
+
+    let port: number;
+    if (options.port !== undefined) {
+        port = options.port;
+    } else if (env.port !== undefined) {
+        port = env.port;
+    } else {
+        port = DEFAULT_PORT;
+    }
+
+    const usesTls =
+        options.ca !== undefined || options.cert !== undefined || options.key !== undefined;
+
+    let protocol: 'http' | 'https';
+    if (options.protocol !== undefined) {
+        protocol = options.protocol;
+    } else if (usesTls) {
+        protocol = 'https';
+    } else {
+        protocol = 'http';
+    }
+
+    return { host: host, port: port, protocol: protocol, baseUrl: `${protocol}://${host}:${port}` };
 }

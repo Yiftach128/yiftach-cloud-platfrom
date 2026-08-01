@@ -2,6 +2,8 @@
 
 Self-hosted cloud control panel. Backend lives in `backend/` (Node 24 + TypeScript, ESM,
 no build step — Node strips types natively, so imports use real `.ts` extensions).
+Frontend lives in `frontend/` (React 19 + TypeScript + Vite, Ant Design UI). The two are
+standalone npm packages — no workspaces.
 
 ## Code conventions
 
@@ -30,10 +32,58 @@ no build step — Node strips types natively, so imports use real `.ts` extensio
   (`/containers`); the version prefix is applied once in `server.ts` when mounting,
   so a version bump touches one line. Exception: `/health` stays unversioned — it is
   an infrastructure liveness probe, not part of the API surface.
+- **Prefer plain, Java-like code over TypeScript shorthand.** Runtime code should read
+  the way it would in Java: explicit type annotations (`Promise<void>`,
+  `readonly url: string`), classic control flow (`if {} else {}` with braces), and
+  simple method chains (`.filter(...).map(...)`) are the house style. Avoid
+  TypeScript/JavaScript-specific shorthand: no ES `#` private members (use the
+  `private` keyword), no `??` / `?.` / `??=`, no truthiness defaulting (`x || fallback`),
+  and no defaulting inside object literals (`{ all: options.all ?? true }`) — resolve
+  each value into a named local with explicit `if`/`else` first, then build the object.
+  Type declarations (interfaces, unions, generics, optional `?:` properties) are not
+  affected — they have no Java equivalent and stay idiomatic TypeScript.
+
+## Backend architecture
+
+Express 5. A request flows route → service → dockerode; errors flow back through the
+error handler.
+
+- `src/server.ts` — composition root: loads `.env`, builds the services, mounts routes
+  under `/api/v1` and the error handler last. No logic.
+- `src/middleware/error-handler.ts` — the only place service errors become HTTP:
+  `DockerApiError` → its status, `DockerConnectionError` → 503, anything else → 500.
+- `src/services/docker/` — `DockerManagerService`, a typed facade over the Docker
+  Engine API (dockerode). Public types in `interfaces.ts`; dockerode/daemon wire shapes
+  are quarantined in `container-mapper.ts` and `classify-dockerode-error.ts`. Every
+  daemon call runs through `withDaemon`, which asks the daemon lifecycle to boot the
+  daemon and retries once when the connection fails.
+- `src/services/wsl-bootstrap/` — `WslDockerDaemon` implements the docker service's
+  `DockerDaemonLifecycle` interface: boots the WSL distro on demand and holds it open
+  (operational details under Verification). `bootstrapWslDocker` builds it and starts a
+  background warm-up.
+
+## Frontend architecture
+
+The code conventions above apply to the frontend too (components take the place of
+classes; JSX files use `.tsx`).
+
+- `src/pages/` — one thin page per route, like backend route files: they only compose
+  components. Routing lives in `App.tsx` (react-router): a pathless layout route renders
+  `components/app-layout.tsx` (AntD sidebar + `<Outlet />`); menu keys are the route paths.
+- `src/components/` — one component per file (e.g. `container-list.tsx`).
+- `src/fetchers/` — all backend API access. `DockerFetcherService` (axios) throws only
+  `DockerFetcherError`, so axios never leaks into components. Wire types in
+  `fetchers/interfaces.ts` mirror the backend's `interfaces.ts`, except JSON-serialized
+  fields (backend `Date` → frontend ISO `string`).
+- The dev server proxies `/api` → `http://127.0.0.1:3000` (`vite.config.ts`); the backend
+  deliberately has no CORS middleware, so never call the backend origin directly.
+- App-wide look and feel is set via antd `ConfigProvider` theme tokens in `main.tsx` —
+  prefer tokens over CSS overrides of `.ant-*` classes.
 
 ## Verification
 
-- Typecheck: `npm run typecheck` (from `backend/`).
+- Typecheck: `npm run typecheck` (from `backend/` or `frontend/`); `npm run build` from
+  `frontend/` also verifies the bundle.
 - The Docker daemon runs in WSL2 Ubuntu on `tcp://127.0.0.1:2375` (IPv4 bind is
   mandatory — WSL's localhost relay does not forward IPv6/dual-stack listeners).
 - WSL does not auto-start, but the backend self-heals: `WslDockerDaemon`

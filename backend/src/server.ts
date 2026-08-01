@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url';
 import express from 'express';
 
 import { errorHandler } from './middleware/error-handler.ts';
+import { getContainerRoute } from './routes/get-container.ts';
 import { getContainersRoute } from './routes/get-containers.ts';
 import { getHealthRoute } from './routes/get-health.ts';
 import { DockerManagerService } from './services/docker/docker-manager-service.ts';
@@ -23,8 +24,17 @@ if (existsSync(envFile)) {
     process.loadEnvFile(envFile);
 }
 
-const PORT = Number(process.env['PORT'] ?? 3000);
-const HOST = process.env['HOST'] ?? '127.0.0.1';
+let port: number = 3000;
+const portEnv = process.env['PORT'];
+if (portEnv !== undefined) {
+    port = Number(portEnv);
+}
+
+let host: string = '127.0.0.1';
+const hostEnv = process.env['HOST'];
+if (hostEnv !== undefined) {
+    host = hostEnv;
+}
 
 const endpoint = resolveDockerEndpoint();
 const daemon = bootstrapWslDocker(endpoint.baseUrl);
@@ -33,13 +43,15 @@ const docker = new DockerManagerService({ daemon });
 const app = express();
 app.use(getHealthRoute(docker)); // liveness probe stays unversioned
 app.use('/api/v1', getContainersRoute(docker));
+app.use('/api/v1', getContainerRoute(docker));
 app.use(errorHandler);
 
-const server = app.listen(PORT, HOST, () => {
-    console.log(`backend listening on http://${HOST}:${PORT} -> docker at ${docker.baseUrl}`);
+const server = app.listen(port, host, () => {
+    console.log(`backend listening on http://${host}:${port} -> docker at ${docker.baseUrl}`);
 });
 
-for (const signal of ['SIGINT', 'SIGTERM'] as const) {
+const shutdownSignals: NodeJS.Signals[] = ['SIGINT', 'SIGTERM'];
+for (const signal of shutdownSignals) {
     process.on(signal, () => {
         daemon.stop();
         server.close(() => process.exit(0));

@@ -26,24 +26,44 @@ const PING_TIMEOUT_MS = 1_500;
 const KEEPALIVE_RESPAWN_DELAY_MS = 5_000;
 
 export class WslDockerDaemon implements DockerDaemonLifecycle {
-    readonly #pingUrl: string;
-    readonly #baseUrl: string;
-    readonly #distro: string;
-    readonly #bootTimeoutMs: number;
-    readonly #pollIntervalMs: number;
-    readonly #keepaliveEnabled: boolean;
+    private readonly pingUrl: string;
+    private readonly baseUrl: string;
+    private readonly distro: string;
+    private readonly bootTimeoutMs: number;
+    private readonly pollIntervalMs: number;
+    private readonly keepaliveEnabled: boolean;
 
-    #ensuring: Promise<void> | null = null;
-    #keepalive: ChildProcess | null = null;
-    #stopped = false;
+    private ensuring: Promise<void> | null = null;
+    private keepalive: ChildProcess | null = null;
+    private stopped: boolean = false;
 
     constructor(options: WslDockerDaemonOptions) {
-        this.#pingUrl = options.pingUrl;
-        this.#baseUrl = options.pingUrl.replace(/\/_ping$/, '');
-        this.#distro = options.distro ?? DEFAULT_DISTRO;
-        this.#bootTimeoutMs = options.bootTimeoutMs ?? DEFAULT_BOOT_TIMEOUT_MS;
-        this.#pollIntervalMs = options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
-        this.#keepaliveEnabled = options.keepalive ?? true;
+        this.pingUrl = options.pingUrl;
+        this.baseUrl = options.pingUrl.replace(/\/_ping$/, '');
+
+        if (options.distro === undefined) {
+            this.distro = DEFAULT_DISTRO;
+        } else {
+            this.distro = options.distro;
+        }
+
+        if (options.bootTimeoutMs === undefined) {
+            this.bootTimeoutMs = DEFAULT_BOOT_TIMEOUT_MS;
+        } else {
+            this.bootTimeoutMs = options.bootTimeoutMs;
+        }
+
+        if (options.pollIntervalMs === undefined) {
+            this.pollIntervalMs = DEFAULT_POLL_INTERVAL_MS;
+        } else {
+            this.pollIntervalMs = options.pollIntervalMs;
+        }
+
+        if (options.keepalive === undefined) {
+            this.keepaliveEnabled = true;
+        } else {
+            this.keepaliveEnabled = options.keepalive;
+        }
     }
 
     /**
@@ -51,50 +71,54 @@ export class WslDockerDaemon implements DockerDaemonLifecycle {
      * Single-flight: concurrent callers share one in-flight attempt.
      */
     ensureRunning(): Promise<void> {
-        this.#ensuring ??= this.#ensure().finally(() => {
-            this.#ensuring = null;
-        });
-        return this.#ensuring;
+        if (this.ensuring === null) {
+            this.ensuring = this.ensure().finally(() => {
+                this.ensuring = null;
+            });
+        }
+        return this.ensuring;
     }
 
     /** Stops respawning and releases the keepalive; the distro may idle out afterwards. */
     stop(): void {
-        this.#stopped = true;
-        this.#keepalive?.kill();
-        this.#keepalive = null;
+        this.stopped = true;
+        if (this.keepalive !== null) {
+            this.keepalive.kill();
+        }
+        this.keepalive = null;
     }
 
-    async #ensure(): Promise<void> {
-        if (await this.#ping()) {
-            this.#startKeepalive();
+    private async ensure(): Promise<void> {
+        if (await this.ping()) {
+            this.startKeepalive();
             return;
         }
         if (process.platform !== 'win32') {
             throw new DockerConnectionError(
-                this.#baseUrl,
+                this.baseUrl,
                 new Error('daemon is down and this is not Windows — no WSL distro to boot'),
             );
         }
 
-        await this.#bootDistro();
+        await this.bootDistro();
 
-        const deadline = Date.now() + this.#bootTimeoutMs;
+        const deadline = Date.now() + this.bootTimeoutMs;
         while (Date.now() < deadline) {
-            if (await this.#ping()) {
-                this.#startKeepalive();
+            if (await this.ping()) {
+                this.startKeepalive();
                 return;
             }
-            await delay(this.#pollIntervalMs);
+            await delay(this.pollIntervalMs);
         }
         throw new DockerConnectionError(
-            this.#baseUrl,
-            new Error(`daemon not ready within ${this.#bootTimeoutMs}ms of booting WSL distro "${this.#distro}"`),
+            this.baseUrl,
+            new Error(`daemon not ready within ${this.bootTimeoutMs}ms of booting WSL distro "${this.distro}"`),
         );
     }
 
-    async #ping(): Promise<boolean> {
+    private async ping(): Promise<boolean> {
         try {
-            const response = await fetch(this.#pingUrl, { signal: AbortSignal.timeout(PING_TIMEOUT_MS) });
+            const response = await fetch(this.pingUrl, { signal: AbortSignal.timeout(PING_TIMEOUT_MS) });
             return response.ok;
         } catch {
             return false;
@@ -102,33 +126,41 @@ export class WslDockerDaemon implements DockerDaemonLifecycle {
     }
 
     /** Boots the distro; a fast no-op when it is already running. */
-    #bootDistro(): Promise<void> {
+    private bootDistro(): Promise<void> {
         return new Promise((resolve) => {
-            const boot = spawn('wsl.exe', ['-d', this.#distro, '-e', 'true'], { stdio: 'ignore' });
+            const boot = spawn('wsl.exe', ['-d', this.distro, '-e', 'true'], { stdio: 'ignore' });
             boot.on('error', () => resolve()); // wsl.exe missing — the poll loop will time out
             boot.on('exit', () => resolve());
         });
     }
 
-    #startKeepalive(): void {
-        if (!this.#keepaliveEnabled || this.#stopped || this.#keepalive) return;
-        if (process.platform !== 'win32') return;
+    private startKeepalive(): void {
+        if (!this.keepaliveEnabled || this.stopped || this.keepalive !== null) {
+            return;
+        }
+        if (process.platform !== 'win32') {
+            return;
+        }
 
-        const child = spawn('wsl.exe', ['-d', this.#distro, '--exec', 'sleep', 'infinity'], {
+        const child = spawn('wsl.exe', ['-d', this.distro, '--exec', 'sleep', 'infinity'], {
             stdio: 'ignore',
         });
         child.unref(); // never holds Node's event loop open
         child.on('error', () => {
-            this.#keepalive = null;
+            this.keepalive = null;
         });
         child.on('exit', () => {
-            this.#keepalive = null;
-            if (this.#stopped) return;
+            this.keepalive = null;
+            if (this.stopped) {
+                return;
+            }
             // WSL was shut down externally; bring it back and hold it open again.
             void delay(KEEPALIVE_RESPAWN_DELAY_MS).then(() => {
-                if (!this.#stopped) void this.ensureRunning().catch(() => {});
+                if (!this.stopped) {
+                    void this.ensureRunning().catch(() => {});
+                }
             });
         });
-        this.#keepalive = child;
+        this.keepalive = child;
     }
 }

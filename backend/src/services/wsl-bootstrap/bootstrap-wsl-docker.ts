@@ -21,9 +21,15 @@ export function bootstrapWslDocker(baseUrl: string): WslDockerDaemon {
     void daemon
         .ensureRunning()
         .then(() => console.log('docker daemon ready'))
-        .catch((error: unknown) =>
-            console.warn(`docker daemon not ready yet: ${error instanceof Error ? error.message : String(error)}`),
-        );
+        .catch((error: unknown) => {
+            let message: string;
+            if (error instanceof Error) {
+                message = error.message;
+            } else {
+                message = String(error);
+            }
+            console.warn(`docker daemon not ready yet: ${message}`);
+        });
 
     return daemon;
 }
