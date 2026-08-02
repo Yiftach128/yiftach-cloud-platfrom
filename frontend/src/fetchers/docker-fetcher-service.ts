@@ -2,7 +2,7 @@ import axios from 'axios';
 import type { AxiosInstance, AxiosResponse } from 'axios';
 
 import { DockerFetcherError } from './docker-fetcher-error.ts';
-import type { Container } from './interfaces.ts';
+import type { Container, ContainerDetails } from './interfaces.ts';
 
 /** Body the backend error handler sends (see backend/src/middleware/error-handler.ts). */
 interface ApiErrorBody {
@@ -19,6 +19,16 @@ export class DockerFetcherService {
     public async getContainers(): Promise<Container[]> {
         try {
             const response: AxiosResponse<Container[]> = await this.http.get('/containers');
+            return response.data;
+        } catch (error) {
+            throw this.toFetcherError(error);
+        }
+    }
+
+    public async getContainer(nameOrId: string): Promise<ContainerDetails> {
+        try {
+            const encodedNameOrId: string = encodeURIComponent(nameOrId);
+            const response: AxiosResponse<ContainerDetails> = await this.http.get(`/containers/${encodedNameOrId}`);
             return response.data;
         } catch (error) {
             throw this.toFetcherError(error);

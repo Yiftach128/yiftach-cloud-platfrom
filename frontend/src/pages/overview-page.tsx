@@ -5,7 +5,6 @@ function OverviewPage(): ReactElement {
     return (
         <Result
             status="info"
-            title="Overview"
             subTitle="The overview dashboard is coming soon."
         />
     );

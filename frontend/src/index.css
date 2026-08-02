@@ -6,16 +6,28 @@ body {
     margin: 0;
 }
 
+/* Height comes from app-layout.tsx (headerRowHeight), shared with the content-side
+   header strip so the two divider halves align into one continuous line. */
 .app-logo {
     color: rgba(0, 0, 0, 0.88);
     font-size: 18px;
     font-weight: 600;
-    padding: 16px;
+    padding: 0 16px;
     white-space: nowrap;
     overflow: hidden;
     display: flex;
     align-items: center;
     gap: 8px;
+}
+
+/* Clickable ancestor crumb in the header breadcrumb (renders as a span, not an <a>,
+   so it gets no link affordance from antd). */
+.app-breadcrumb-link {
+    cursor: pointer;
+}
+
+.app-breadcrumb-link:hover {
+    color: rgba(0, 0, 0, 0.88);
 }
 
 .app-sider-menu .ant-menu-item {

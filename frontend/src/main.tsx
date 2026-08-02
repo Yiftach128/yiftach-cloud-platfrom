@@ -12,6 +12,10 @@ import App from './App.tsx';
  */
 const appTheme: ThemeConfig = {
     components: {
+        Breadcrumb: {
+            /* Header-strip typography: pairs with .app-logo (18px, bold last crumb). */
+            fontSize: 18,
+        },
         Menu: {
             itemSelectedBg: 'transparent',
             itemSelectedColor: 'rgba(0, 0, 0, 0.88)',

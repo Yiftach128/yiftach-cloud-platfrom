@@ -5,7 +5,6 @@ function NewContainerPage(): ReactElement {
     return (
         <Result
             status="info"
-            title="New Container"
             subTitle="Creating containers is coming soon — the backend does not expose this yet."
         />
     );

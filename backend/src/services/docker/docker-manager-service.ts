@@ -108,13 +108,12 @@ export class DockerManagerService {
     }
 
     /**
-     * Removes a container. Throws {@link DockerApiError} with status 409 if it is
-     * still running and `force` was not set, and 404 if it no longer exists.
+     * Removes a container. `id` may be a full or short container ID, or a container
+     * name — whatever the daemon accepts. Throws {@link DockerApiError} with status
+     * 409 if the container is still running and `force` was not set, and 404 if it
+     * no longer exists.
      */
-    async deleteContainer(
-        container: Container,
-        options: DeleteContainerOptions = {},
-    ): Promise<void> {
+    async deleteContainer(id: string, options: DeleteContainerOptions = {}): Promise<void> {
         let force: boolean;
         if (options.force === undefined) {
             force = false;
@@ -136,8 +135,8 @@ export class DockerManagerService {
             v: removeVolumes,
         };
 
-        await this.withDaemon(`DELETE /containers/${container.id}`, () =>
-            this.docker.getContainer(container.id).remove(removeOptions),
+        await this.withDaemon(`DELETE /containers/${id}`, () =>
+            this.docker.getContainer(id).remove(removeOptions),
         );
     }
 

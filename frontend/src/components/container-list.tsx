@@ -4,49 +4,17 @@ import dayjs from 'dayjs';
 import relativeTime from 'dayjs/plugin/relativeTime';
 import { useEffect, useState } from 'react';
 import type { ReactElement } from 'react';
+import { useNavigate } from 'react-router';
 
 dayjs.extend(relativeTime);
 
 import { DockerFetcherError } from '../fetchers/docker-fetcher-error.ts';
 import type { Container, ContainerState, PortBinding } from '../fetchers/interfaces.ts';
+import { formatPorts, formatTimestamp, stateTagColor } from './container-format.ts';
 import type { ContainerListProps } from './interfaces.ts';
-
-function stateTagColor(state: ContainerState): string {
-    switch (state) {
-        case 'created':
-            return 'blue';
-        case 'restarting':
-            return 'orange';
-        case 'running':
-            return 'green';
-        case 'removing':
-            return 'orange';
-        case 'paused':
-            return 'gold';
-        case 'exited':
-            return 'default';
-        case 'dead':
-            return 'red';
-    }
-}
-
-function formatPorts(ports: PortBinding[]): string {
-    return ports
-        .map((port: PortBinding) => {
-            if (port.publicPort !== undefined) {
-                return `${port.publicPort}→${port.privatePort}/${port.type}`;
-            }
-            return `${port.privatePort}/${port.type}`;
-        })
-        .join(', ');
-}
 
 function formatCreatedAt(createdAt: string): string {
     return dayjs(createdAt).fromNow();
-}
-
-function formatExactCreatedAt(createdAt: string): string {
-    return dayjs(createdAt).format('YYYY-MM-DD HH:mm:ss');
 }
 
 const columns: TableProps<Container>['columns'] = [
@@ -70,12 +38,13 @@ const columns: TableProps<Container>['columns'] = [
         dataIndex: 'createdAt',
         key: 'createdAt',
         render: (createdAt: string) => (
-            <Tooltip title={formatExactCreatedAt(createdAt)}>{formatCreatedAt(createdAt)}</Tooltip>
+            <Tooltip title={formatTimestamp(createdAt)}>{formatCreatedAt(createdAt)}</Tooltip>
         ),
     },
 ];
 
 function ContainerList(props: ContainerListProps): ReactElement {
+    const navigate = useNavigate();
     const [containers, setContainers] = useState<Container[]>([]);
     const [errorMessage, setErrorMessage] = useState<string | null>(null);
     const [isLoading, setIsLoading] = useState<boolean>(true);
@@ -123,6 +92,12 @@ function ContainerList(props: ContainerListProps): ReactElement {
             rowKey="id"
             loading={isLoading}
             pagination={false}
+            onRow={(record: Container) => ({
+                onClick: (): void => {
+                    navigate(`/services/${encodeURIComponent(record.name)}`);
+                },
+                style: { cursor: 'pointer' },
+            })}
         />
     );
 }
