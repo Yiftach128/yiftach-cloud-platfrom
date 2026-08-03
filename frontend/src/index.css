@@ -47,3 +47,21 @@ body {
     border-radius: 2px;
     background-color: #8c8c8c;
 }
+
+/* Services-list row actions: invisible (but layout-preserving) until the row
+   is hovered or holds keyboard focus. pointer-events blocks clicks on the
+   invisible buttons. The -pinned modifier keeps them visible while an action
+   runs or the delete Popconfirm is open — the pointer then sits in the
+   portaled popup, so the row loses :hover. */
+.app-container-table .app-row-actions {
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.15s ease-in-out;
+}
+
+.app-container-table .ant-table-row:hover .app-row-actions,
+.app-container-table .ant-table-row:focus-within .app-row-actions,
+.app-container-table .app-row-actions-pinned {
+    opacity: 1;
+    pointer-events: auto;
+}

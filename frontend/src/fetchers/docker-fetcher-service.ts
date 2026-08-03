@@ -92,6 +92,16 @@ export class DockerFetcherService {
         }
     }
 
+    /** Empties the container's log; the backend answers 409 when the log driver keeps no truncatable file. */
+    public async clearContainerLogs(nameOrId: string): Promise<void> {
+        try {
+            const encodedNameOrId: string = encodeURIComponent(nameOrId);
+            await this.http.delete(`/containers/${encodedNameOrId}/logs`);
+        } catch (error) {
+            throw this.toFetcherError(error);
+        }
+    }
+
     private toFetcherError(error: unknown): DockerFetcherError {
         if (axios.isAxiosError<ApiErrorBody>(error)) {
             const response = error.response;

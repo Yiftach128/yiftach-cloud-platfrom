@@ -1,6 +1,7 @@
 import type { ReactElement } from 'react';
 
 import type { DockerFetcherService } from '../fetchers/docker-fetcher-service.ts';
+import type { ContainerState } from '../fetchers/interfaces.ts';
 
 export interface ContainerListProps {
     fetcher: DockerFetcherService;
@@ -23,7 +24,7 @@ export interface ContainerDetailsProps {
 }
 
 /** Actions the container toolbar can run; keys the per-button loading state. */
-export type ContainerAction = 'start' | 'stop' | 'restart' | 'delete';
+export type ContainerAction = 'start' | 'stop' | 'restart' | 'clear-logs' | 'delete';
 
 export interface ContainerControlsProps {
     fetcher: DockerFetcherService;
@@ -42,4 +43,14 @@ export interface ContainerControlsProps {
 export interface ContainerLogsPanelProps {
     fetcher: DockerFetcherService;
     containerName: string;
+}
+
+export interface ContainerRowActionsProps {
+    fetcher: DockerFetcherService;
+    /** Row's primary name; the fetcher handles URL encoding. */
+    containerName: string;
+    /** List-endpoint lifecycle state — drives the Start/Stop toggle. */
+    state: ContainerState;
+    /** Called after any successful action so the list re-fetches. */
+    onMutated: () => void;
 }

@@ -1,18 +1,11 @@
-import { DeleteOutlined, FileTextOutlined, PlayCircleOutlined, PoweroffOutlined, ReloadOutlined } from '@ant-design/icons';
+import { ClearOutlined, DeleteOutlined, FileTextOutlined, PlayCircleOutlined, PoweroffOutlined, ReloadOutlined } from '@ant-design/icons';
 import { App as AntdApp, Button, Flex, Popconfirm } from 'antd';
 import { useState } from 'react';
 import type { ReactElement } from 'react';
 import { useNavigate } from 'react-router';
 
-import { DockerFetcherError } from '../fetchers/docker-fetcher-error.ts';
+import { toErrorText } from './container-format.ts';
 import type { ContainerAction, ContainerControlsProps } from './interfaces.ts';
-
-function toErrorText(error: unknown): string {
-    if (error instanceof DockerFetcherError) {
-        return error.message;
-    }
-    return 'Unexpected error while calling the backend';
-}
 
 function ContainerControls(props: ContainerControlsProps): ReactElement {
     const navigate = useNavigate();
@@ -45,6 +38,13 @@ function ContainerControls(props: ContainerControlsProps): ReactElement {
 
     async function handleRestart(): Promise<void> {
         await runAction('restart', () => props.fetcher.restartContainer(props.containerName), 'Container restarted');
+    }
+
+    /* Returning the promise keeps the Popconfirm open with its OK button
+       loading until the call ends. The onMutated re-fetch also remounts an
+       open logs panel, so its tail restarts from the now-empty log. */
+    async function handleClearLogs(): Promise<void> {
+        await runAction('clear-logs', () => props.fetcher.clearContainerLogs(props.containerName), 'Logs cleared');
     }
 
     /* Not runAction: success navigates away and unmounts this component, so
@@ -105,6 +105,21 @@ function ContainerControls(props: ContainerControlsProps): ReactElement {
             <Button icon={<FileTextOutlined />} disabled={actionPending} onClick={props.onToggleLogs}>
                 {logsLabel}
             </Button>
+            <Popconfirm
+                title="Clear container logs?"
+                description="This permanently empties the container's log file."
+                okText="Clear"
+                okButtonProps={{ danger: true }}
+                onConfirm={handleClearLogs}
+            >
+                <Button
+                    icon={<ClearOutlined />}
+                    loading={pendingAction === 'clear-logs'}
+                    disabled={actionPending && pendingAction !== 'clear-logs'}
+                >
+                    Clear Logs
+                </Button>
+            </Popconfirm>
             <Popconfirm
                 title="Delete container?"
                 description="This stops and removes the container. Volumes are kept."

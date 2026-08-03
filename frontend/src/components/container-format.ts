@@ -1,8 +1,9 @@
 import dayjs from 'dayjs';
 
+import { DockerFetcherError } from '../fetchers/docker-fetcher-error.ts';
 import type { ContainerState, PortBinding } from '../fetchers/interfaces.ts';
 
-/** Formatting helpers shared by the container list and the container details view. */
+/** Formatting and action-toolbar helpers shared by the container list and the container details view. */
 
 export function stateTagColor(state: ContainerState): string {
     switch (state) {
@@ -36,4 +37,26 @@ export function formatPorts(ports: PortBinding[]): string {
 
 export function formatTimestamp(iso: string): string {
     return dayjs(iso).format('YYYY-MM-DD HH:mm:ss');
+}
+
+/** True for states where Docker's inspect `State.Running` is true — where `stop` is the sensible toggle verb. */
+export function isRunningLike(state: ContainerState): boolean {
+    switch (state) {
+        case 'running':
+        case 'paused':
+        case 'restarting':
+            return true;
+        case 'created':
+        case 'removing':
+        case 'exited':
+        case 'dead':
+            return false;
+    }
+}
+
+export function toErrorText(error: unknown): string {
+    if (error instanceof DockerFetcherError) {
+        return error.message;
+    }
+    return 'Unexpected error while calling the backend';
 }

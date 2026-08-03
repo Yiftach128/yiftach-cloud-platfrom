@@ -9,15 +9,17 @@ import { useNavigate } from 'react-router';
 dayjs.extend(relativeTime);
 
 import { DockerFetcherError } from '../fetchers/docker-fetcher-error.ts';
+import type { DockerFetcherService } from '../fetchers/docker-fetcher-service.ts';
 import type { Container, ContainerState, PortBinding } from '../fetchers/interfaces.ts';
 import { formatPorts, formatTimestamp, stateTagColor } from './container-format.ts';
+import ContainerRowActions from './container-row-actions.tsx';
 import type { ContainerListProps } from './interfaces.ts';
 
 function formatCreatedAt(createdAt: string): string {
     return dayjs(createdAt).fromNow();
 }
 
-const columns: TableProps<Container>['columns'] = [
+const staticColumns: NonNullable<TableProps<Container>['columns']> = [
     { title: 'Name', dataIndex: 'name', key: 'name' },
     { title: 'Image', dataIndex: 'image', key: 'image' },
     {
@@ -43,15 +45,38 @@ const columns: TableProps<Container>['columns'] = [
     },
 ];
 
+function buildColumns(fetcher: DockerFetcherService, onMutated: () => void): NonNullable<TableProps<Container>['columns']> {
+    return staticColumns.concat([
+        {
+            title: '',
+            key: 'actions',
+            align: 'right',
+            width: 120,
+            render: (_value: unknown, record: Container) => (
+                <ContainerRowActions
+                    fetcher={fetcher}
+                    containerName={record.name}
+                    state={record.state}
+                    onMutated={onMutated}
+                />
+            ),
+        },
+    ]);
+}
+
 function ContainerList(props: ContainerListProps): ReactElement {
     const navigate = useNavigate();
     const [containers, setContainers] = useState<Container[]>([]);
     const [errorMessage, setErrorMessage] = useState<string | null>(null);
     const [isLoading, setIsLoading] = useState<boolean>(true);
+    const [reloadCounter, setReloadCounter] = useState<number>(0);
 
     useEffect(() => {
         let disposed: boolean = false;
 
+        /* Re-fetches (reloadCounter bumps after a row action) are deliberately
+           silent — no loading/containers reset — so the existing rows stay
+           rendered and the hovered row's toolbar does not flash away. */
         props.fetcher.getContainers()
             .then((result: Container[]) => {
                 if (!disposed) {
@@ -73,7 +98,11 @@ function ContainerList(props: ContainerListProps): ReactElement {
         return () => {
             disposed = true;
         };
-    }, [props.fetcher]);
+    }, [props.fetcher, reloadCounter]);
+
+    function handleMutated(): void {
+        setReloadCounter((value: number) => value + 1);
+    }
 
     if (errorMessage !== null) {
         return (
@@ -85,8 +114,10 @@ function ContainerList(props: ContainerListProps): ReactElement {
             />
         );
     }
+    const columns: NonNullable<TableProps<Container>['columns']> = buildColumns(props.fetcher, handleMutated);
     return (
         <Table<Container>
+            className="app-container-table"
             columns={columns}
             dataSource={containers}
             rowKey="id"
