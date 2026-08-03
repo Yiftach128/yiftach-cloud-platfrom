@@ -231,11 +231,22 @@ export interface DockerEndpoint {
 /**
  * The slice of a daemon lifecycle the manager depends on — kept as an interface so
  * the manager never imports a concrete (platform-specific) implementation. The WSL
- * implementation lives in `src/services/wsl-bootstrap/`.
+ * implementation lives in `src/services/wsl/`.
  */
 export interface DockerDaemonLifecycle {
     /** Resolves once the daemon answers; rejects if it cannot be brought up. */
     ensureRunning(): Promise<void>;
+}
+
+/**
+ * Host-level file access on the machine where dockerd runs. The Engine API has no
+ * endpoint for touching daemon-side files — clearing a container's log means
+ * truncating the log driver's file on the daemon host — so each deployment
+ * supplies this capability (here: running commands inside the WSL distro).
+ */
+export interface DockerHostFiles {
+    /** Truncates a file on the daemon host to zero bytes. Rejects if the file cannot be touched. */
+    truncateFile(absolutePath: string): Promise<void>;
 }
 
 export interface DockerManagerOptions {
@@ -261,6 +272,11 @@ export interface DockerManagerOptions {
      * `ensureRunning()` and retries the request once.
      */
     daemon?: DockerDaemonLifecycle;
+    /**
+     * Daemon-host file access, required only by `clearContainerLogs`. Omitting it
+     * makes that operation fail; everything else works without it.
+     */
+    hostFiles?: DockerHostFiles;
 }
 
 export interface GetContainersOptions {
@@ -278,4 +294,48 @@ export interface DeleteContainerOptions {
     force?: boolean;
     /** Also remove anonymous volumes attached to the container. Named volumes are never removed. */
     removeVolumes?: boolean;
+}
+
+export interface StopContainerOptions {
+    /** Seconds the daemon waits for a graceful stop before killing the container. Daemon default is 10. */
+    timeoutSeconds?: number;
+}
+
+export interface RestartContainerOptions {
+    /** Seconds the daemon waits for the stop phase before killing the container. Daemon default is 10. */
+    timeoutSeconds?: number;
+}
+
+export interface GetContainerLogsOptions {
+    /** Only the last N lines, or 'all' for the full log. Defaults to 500. */
+    tail?: number | 'all';
+    /**
+     * Only lines logged at or after this time, as an RFC3339 timestamp. Kept a
+     * string end to end so nanosecond precision survives (a JS Date cannot hold
+     * it) — pass a previous line's `timestamp` to resume where a poll left off.
+     * The filter is inclusive: the line carrying that exact timestamp repeats.
+     */
+    since?: string;
+}
+
+/** One log line, in the order the daemon reported it. */
+export interface ContainerLogLine {
+    /** Origin stream. TTY containers merge both streams at the source; their lines all report 'stdout'. */
+    stream: 'stdout' | 'stderr';
+    /**
+     * When the line was logged, as the daemon's RFC3339Nano string (e.g.
+     * "2026-08-02T18:46:42.037262344Z"). Deliberately a string, not a Date:
+     * nanosecond precision must survive a round trip back into
+     * {@link GetContainerLogsOptions.since}. Empty only if the daemon ever emits
+     * a line without a parseable timestamp prefix.
+     */
+    timestamp: string;
+    /** Line text without the trailing newline or the timestamp prefix. */
+    text: string;
+}
+
+export interface ContainerLogs {
+    /** True when the container runs a TTY, meaning the stdout/stderr distinction is lost. */
+    tty: boolean;
+    lines: ContainerLogLine[];
 }

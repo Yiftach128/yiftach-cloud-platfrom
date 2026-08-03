@@ -224,3 +224,36 @@ export interface ContainerDetails {
     ports: PortBinding[];
     networks: NetworkAttachment[];
 }
+
+export interface GetContainerLogsOptions {
+    /** Only the last N lines, or 'all' for the full log. The backend defaults to 500. */
+    tail?: number | 'all';
+    /**
+     * Only lines logged at or after this time, as an RFC3339 timestamp. Pass a
+     * previous line's `timestamp` back verbatim to poll for what came next —
+     * never through a Date, which would truncate the nanosecond precision. The
+     * filter is inclusive: the line carrying that exact timestamp repeats.
+     */
+    since?: string;
+}
+
+/** One log line, in the order the daemon reported it. */
+export interface ContainerLogLine {
+    /** Origin stream. TTY containers merge both streams at the source; their lines all report 'stdout'. */
+    stream: 'stdout' | 'stderr';
+    /**
+     * When the line was logged, as the daemon's RFC3339Nano string (e.g.
+     * "2026-08-02T18:46:42.037262344Z"). A string, not a Date, so it survives a
+     * round trip into {@link GetContainerLogsOptions.since}. Empty only if the
+     * daemon ever emits a line without a parseable timestamp prefix.
+     */
+    timestamp: string;
+    /** Line text without the trailing newline or the timestamp prefix. */
+    text: string;
+}
+
+export interface ContainerLogs {
+    /** True when the container runs a TTY, meaning the stdout/stderr distinction is lost. */
+    tty: boolean;
+    lines: ContainerLogLine[];
+}

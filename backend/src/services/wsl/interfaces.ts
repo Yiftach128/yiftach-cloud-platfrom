@@ -17,3 +17,8 @@ export interface WslDockerDaemonOptions {
     /** Hold the distro open after a successful ensure, preventing WSL's idle teardown. Defaults to true. */
     keepalive?: boolean;
 }
+
+export interface WslDockerHostFilesOptions {
+    /** WSL distro that hosts dockerd. Defaults to "Ubuntu". */
+    distro?: string;
+}

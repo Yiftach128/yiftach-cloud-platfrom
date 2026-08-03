@@ -1,4 +1,4 @@
-import { Alert, Descriptions, Flex, Skeleton, Table, Tag, Tooltip, Typography } from 'antd';
+import { Alert, Descriptions, Divider, Flex, Skeleton, Splitter, Table, Tag, Tooltip, Typography } from 'antd';
 import type { DescriptionsProps, TableProps } from 'antd';
 import dayjs from 'dayjs';
 import relativeTime from 'dayjs/plugin/relativeTime';
@@ -20,6 +20,8 @@ import type {
     NetworkAttachment,
     PortBinding,
 } from '../fetchers/interfaces.ts';
+import ContainerControls from './container-controls.tsx';
+import ContainerLogsPanel from './container-logs-panel.tsx';
 import { formatTimestamp, stateTagColor } from './container-format.ts';
 import type { ContainerDetailsProps } from './interfaces.ts';
 
@@ -252,6 +254,8 @@ function ContainerDetails(props: ContainerDetailsProps): ReactElement {
     const [details, setDetails] = useState<ContainerDetailsData | null>(null);
     const [errorMessage, setErrorMessage] = useState<string | null>(null);
     const [isLoading, setIsLoading] = useState<boolean>(true);
+    const [reloadCounter, setReloadCounter] = useState<number>(0);
+    const [logsOpen, setLogsOpen] = useState<boolean>(false);
 
     useEffect(() => {
         let disposed: boolean = false;
@@ -287,7 +291,15 @@ function ContainerDetails(props: ContainerDetailsProps): ReactElement {
         return () => {
             disposed = true;
         };
-    }, [props.fetcher, props.containerName]);
+    }, [props.fetcher, props.containerName, reloadCounter]);
+
+    function handleMutated(): void {
+        setReloadCounter((value: number) => value + 1);
+    }
+
+    function handleToggleLogs(): void {
+        setLogsOpen((value: boolean) => !value);
+    }
 
     if (errorMessage !== null) {
         return (
@@ -319,7 +331,7 @@ function ContainerDetails(props: ContainerDetailsProps): ReactElement {
         healthSection = <Descriptions title="Health" bordered size="small" column={2} items={buildHealthItems(health)} />;
     }
 
-    return (
+    const detailSections: ReactElement = (
         <Flex vertical gap={24}>
             <Descriptions title="Overview" bordered size="small" column={2} items={buildOverviewItems(details)} />
             <Descriptions title="State" bordered size="small" column={2} items={buildStateItems(details.state)} />
@@ -356,6 +368,44 @@ function ContainerDetails(props: ContainerDetailsProps): ReactElement {
                     pagination={false}
                 />
             </div>
+        </Flex>
+    );
+
+    let content: ReactElement;
+    if (logsOpen) {
+        /* Side-by-side split: details scroll in the left pane, logs tail in the
+           right, divider draggable. The height pins the split to the viewport:
+           100vh minus the layout header (56 + 1 divider), content padding
+           (24 + 24), the toolbar row (32), its divider (1), and two Flex
+           gaps (24 + 24). */
+        content = (
+            <Splitter style={{ height: 'calc(100vh - 186px)' }}>
+                <Splitter.Panel defaultSize="55%" min="25%">
+                    <div style={{ height: '100%', overflowY: 'auto', paddingRight: 16 }}>
+                        {detailSections}
+                    </div>
+                </Splitter.Panel>
+                <Splitter.Panel min={280}>
+                    <ContainerLogsPanel fetcher={props.fetcher} containerName={props.containerName} />
+                </Splitter.Panel>
+            </Splitter>
+        );
+    } else {
+        content = detailSections;
+    }
+
+    return (
+        <Flex vertical gap={24}>
+            <ContainerControls
+                fetcher={props.fetcher}
+                containerName={props.containerName}
+                running={details.state.running}
+                logsOpen={logsOpen}
+                onToggleLogs={handleToggleLogs}
+                onMutated={handleMutated}
+            />
+            <Divider style={{ margin: 0 }} />
+            {content}
         </Flex>
     );
 }

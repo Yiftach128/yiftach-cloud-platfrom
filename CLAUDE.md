@@ -57,10 +57,12 @@ error handler.
   are quarantined in `container-mapper.ts` and `classify-dockerode-error.ts`. Every
   daemon call runs through `withDaemon`, which asks the daemon lifecycle to boot the
   daemon and retries once when the connection fails.
-- `src/services/wsl-bootstrap/` — `WslDockerDaemon` implements the docker service's
-  `DockerDaemonLifecycle` interface: boots the WSL distro on demand and holds it open
-  (operational details under Verification). `bootstrapWslDocker` builds it and starts a
-  background warm-up.
+- `src/services/wsl/` — the WSL deployment adapters for the docker service's
+  host-side contracts. `WslDockerDaemon` implements `DockerDaemonLifecycle`: boots
+  the WSL distro on demand and holds it open (operational details under
+  Verification); `bootstrapWslDocker` builds it and starts a background warm-up.
+  `WslDockerHostFiles` implements `DockerHostFiles`: daemon-host file operations
+  (log clearing) via `wsl.exe -u root`.
 
 ## Frontend architecture
 
@@ -87,7 +89,7 @@ classes; JSX files use `.tsx`).
 - The Docker daemon runs in WSL2 Ubuntu on `tcp://127.0.0.1:2375` (IPv4 bind is
   mandatory — WSL's localhost relay does not forward IPv6/dual-stack listeners).
 - WSL does not auto-start, but the backend self-heals: `WslDockerDaemon`
-  (`backend/src/services/wsl-bootstrap/wsl-docker-daemon.ts`) boots the distro when a request
+  (`backend/src/services/wsl/wsl-docker-daemon.ts`) boots the distro when a request
   finds the daemon dead, retries once, and holds the distro open while the server runs
   (`DOCKER_WSL_KEEPALIVE=0` disables the hold-open). A cold request takes ~10s
   (daemon startup is deliberately slowed ~7-20s by Docker 29's TLS deprecation

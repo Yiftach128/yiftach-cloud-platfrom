@@ -21,30 +21,42 @@ import { DockerConnectionError } from './docker-connection-error.ts';
 import type {
     Container,
     ContainerDetails,
+    ContainerLogs,
     DeleteContainerOptions,
     DockerDaemonLifecycle,
+    DockerHostFiles,
     DockerManagerOptions,
+    GetContainerLogsOptions,
     GetContainersOptions,
+    RestartContainerOptions,
+    StopContainerOptions,
 } from './interfaces.ts';
+import { LogsNotClearableError } from './logs-not-clearable-error.ts';
+import { parseContainerLogs } from './parse-container-logs.ts';
 import { resolveDockerEndpoint } from './resolve-docker-endpoint.ts';
+import { toDaemonTimestamp } from './to-daemon-timestamp.ts';
 
 export * from './docker-api-error.ts';
 export * from './docker-connection-error.ts';
 export * from './interfaces.ts';
+export * from './logs-not-clearable-error.ts';
 
 const DEFAULT_TIMEOUT_MS = 10_000;
+const DEFAULT_LOG_TAIL = 500;
 
 export class DockerManagerService {
     /** Endpoint this instance talks to, e.g. "http://127.0.0.1:2375". For logging and errors. */
     readonly baseUrl: string;
     private readonly docker: Docker;
     private readonly daemon: DockerDaemonLifecycle | undefined;
+    private readonly hostFiles: DockerHostFiles | undefined;
 
     constructor(options: DockerManagerOptions = {}) {
         const endpoint = resolveDockerEndpoint(options);
 
         this.baseUrl = endpoint.baseUrl;
         this.daemon = options.daemon;
+        this.hostFiles = options.hostFiles;
 
         let timeout: number;
         if (options.requestTimeoutMs === undefined) {
@@ -138,6 +150,134 @@ export class DockerManagerService {
         await this.withDaemon(`DELETE /containers/${id}`, () =>
             this.docker.getContainer(id).remove(removeOptions),
         );
+    }
+
+    /**
+     * Starts a container. Idempotent: starting an already-running container is a
+     * no-op (the engine's 304 is treated as success). Throws {@link DockerApiError}
+     * with status 404 when the container does not exist.
+     */
+    async startContainer(id: string): Promise<void> {
+        await this.withDaemonIdempotent(`POST /containers/${id}/start`, () =>
+            this.docker.getContainer(id).start(),
+        );
+    }
+
+    /**
+     * Stops a container. Idempotent: stopping an already-stopped container is a
+     * no-op (the engine's 304 is treated as success). Throws {@link DockerApiError}
+     * with status 404 when the container does not exist.
+     */
+    async stopContainer(id: string, options: StopContainerOptions = {}): Promise<void> {
+        const stopOptions: Docker.ContainerStopOptions = {};
+        if (options.timeoutSeconds !== undefined) {
+            stopOptions.t = options.timeoutSeconds;
+        }
+
+        await this.withDaemonIdempotent(`POST /containers/${id}/stop`, () =>
+            this.docker.getContainer(id).stop(stopOptions),
+        );
+    }
+
+    /**
+     * Restarts a container: stops it first when running, then starts it. Unlike
+     * start and stop, the engine never answers 304 here. Throws
+     * {@link DockerApiError} with status 404 when the container does not exist.
+     */
+    async restartContainer(id: string, options: RestartContainerOptions = {}): Promise<void> {
+        // Built explicitly: dockerode's promise overload of restart() is typed `{}`
+        // (like remove()), so a typo in this object would otherwise go unnoticed.
+        const restartOptions: { t?: number } = {};
+        if (options.timeoutSeconds !== undefined) {
+            restartOptions.t = options.timeoutSeconds;
+        }
+
+        await this.withDaemon(`POST /containers/${id}/restart`, () =>
+            this.docker.getContainer(id).restart(restartOptions),
+        );
+    }
+
+    /**
+     * A snapshot of a container's log (no follow), each line carrying its
+     * timestamp. Inspects the container first: TTY containers emit a raw byte
+     * stream while non-TTY containers emit Docker's multiplexed framing, and only
+     * the inspect result says which. Throws {@link DockerApiError} with status 404
+     * when the container does not exist.
+     */
+    async getContainerLogs(id: string, options: GetContainerLogsOptions = {}): Promise<ContainerLogs> {
+        const details: ContainerDetails = await this.getContainerById(id);
+        const tty: boolean = details.config.tty;
+
+        let tail: number | 'all';
+        if (options.tail === undefined) {
+            tail = DEFAULT_LOG_TAIL;
+        } else {
+            tail = options.tail;
+        }
+
+        // The `follow: false` literal in the type is what selects dockerode's
+        // Promise<Buffer> overload (the `follow: true` overload returns a stream).
+        // Timestamps are always requested; the parser turns each line's prefix
+        // into the structured `timestamp` field.
+        const logsOptions: Docker.ContainerLogsOptions & { follow: false } = {
+            follow: false,
+            stdout: true,
+            stderr: true,
+            timestamps: true,
+        };
+        if (tail !== 'all') {
+            logsOptions.tail = tail;
+        }
+        if (options.since !== undefined) {
+            logsOptions.since = toDaemonTimestamp(options.since);
+        }
+
+        const payload = await this.withDaemon(`GET /containers/${id}/logs`, () =>
+            this.docker.getContainer(id).logs(logsOptions),
+        );
+        return { tty: tty, lines: parseContainerLogs(payload, tty) };
+    }
+
+    /**
+     * Empties a container's log by truncating the log file on the daemon host —
+     * the Engine API has no endpoint for this. Works while the container runs
+     * (the json-file driver appends, so writes continue cleanly). Throws
+     * {@link LogsNotClearableError} when the container's log driver keeps no
+     * truncatable file, and {@link DockerApiError} with status 404 when the
+     * container does not exist.
+     */
+    async clearContainerLogs(id: string): Promise<void> {
+        if (this.hostFiles === undefined) {
+            throw new Error('clearing logs needs daemon-host file access, which this deployment did not configure');
+        }
+
+        const details: ContainerDetails = await this.getContainerById(id);
+
+        const driver: string = details.hostConfig.logConfig.type;
+        if (driver !== 'json-file') {
+            throw new LogsNotClearableError(details.name, `log driver "${driver}" does not keep logs in a truncatable file`);
+        }
+        if (details.logPath === '') {
+            throw new LogsNotClearableError(details.name, 'the daemon reports no log file for it');
+        }
+
+        await this.hostFiles.truncateFile(details.logPath);
+    }
+
+    /**
+     * Like withDaemon, for lifecycle endpoints where the engine answers 304 Not
+     * Modified when the container is already in the requested state — treated as
+     * success so start/stop are idempotent.
+     */
+    private async withDaemonIdempotent(endpoint: string, fn: () => Promise<unknown>): Promise<void> {
+        try {
+            await this.withDaemon(endpoint, fn);
+        } catch (error) {
+            if (error instanceof DockerApiError && error.status === 304) {
+                return;
+            }
+            throw error;
+        }
     }
 
     /**
