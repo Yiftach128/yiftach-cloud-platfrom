@@ -1,4 +1,4 @@
-import { CloudOutlined, CloudServerOutlined, DashboardOutlined, PlusOutlined } from '@ant-design/icons';
+import { CloudOutlined, CloudServerOutlined, CodeSandboxOutlined, DashboardOutlined, PlusOutlined } from '@ant-design/icons';
 import { Divider, Layout, Menu } from 'antd';
 import type { MenuProps } from 'antd';
 import type { ReactElement } from 'react';
@@ -20,7 +20,13 @@ const dividerColor: string = '#d9d9d9';
    derivation, and the header breadcrumb roots. Paths double as menu keys. */
 const navItems: NavItem[] = [
     { path: '/services', icon: <CloudServerOutlined />, label: 'My Services' },
-    { path: '/containers/new', icon: <PlusOutlined />, label: 'New Container' },
+    {
+        path: '/containers/new',
+        icon: <PlusOutlined />,
+        label: 'New Container',
+        childLabels: { database: 'Database', image: 'Docker Image', github: 'GitHub Repository' },
+    },
+    { path: '/images', icon: <CodeSandboxOutlined />, label: 'My Images' },
     { path: '/overview', icon: <DashboardOutlined />, label: 'Overview' },
 ];
 

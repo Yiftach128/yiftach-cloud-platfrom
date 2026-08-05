@@ -257,3 +257,83 @@ export interface ContainerLogs {
     tty: boolean;
     lines: ContainerLogLine[];
 }
+
+/**
+ * One environment variable a preset's image understands (mirrors
+ * backend/src/services/images/interfaces.ts).
+ */
+export interface PresetEnvVar {
+    /** Variable name exactly as the image expects it, e.g. "POSTGRES_PASSWORD". */
+    name: string;
+    /** What the variable controls, shown next to the input. */
+    description: string;
+    /** True when the container cannot start without a value. */
+    required: boolean;
+    /** Static value the image falls back to when unset. Omitted when there is none. */
+    defaultValue?: string;
+}
+
+/** One image the platform knows how to create containers from. */
+export interface ImagePreset {
+    /** Stable identifier, e.g. "mongo". */
+    name: string;
+    /** Human-readable label, e.g. "MongoDB". */
+    displayName: string;
+    /** One-sentence description for the catalog UI. */
+    description: string;
+    /** Full image reference to create from, e.g. "mongo:8". */
+    image: string;
+    /** Port the service listens on inside the container. */
+    containerPort: number;
+    /** Environment variables the user can or must supply. */
+    envVars: PresetEnvVar[];
+}
+
+/** One platform-built image (labeled cloudplatform.managed=true), from GET /images. */
+export interface ImageSummary {
+    /** Content digest, e.g. "sha256:...". */
+    id: string;
+    /** Repository tags, e.g. "cloudplatform/build-owner-repo:a1b2c3d4"; empty for dangling images. */
+    tags: string[];
+    /** ISO 8601 timestamp (a Date on the backend, serialized by JSON). */
+    createdAt: string;
+    /** Image disk size in bytes, as reported by the daemon. */
+    sizeBytes: number;
+    labels: Record<string, string>;
+    /** Containers created from this image; -1 when the daemon does not compute the count. */
+    containers: number;
+}
+
+/** One host→container port publication in a create request. TCP only for now. */
+export interface PortMappingRequest {
+    hostPort: number;
+    containerPort: number;
+}
+
+/** Body of POST /containers. The backend pulls `image` first when it is missing locally. */
+export interface CreateContainerRequest {
+    name: string;
+    image: string;
+    ports: PortMappingRequest[];
+    env: Record<string, string>;
+}
+
+export type BuildJobStatus = 'running' | 'succeeded' | 'failed';
+
+/** One daemon-side git build (mirrors backend/src/services/builds/interfaces.ts). */
+export interface BuildJob {
+    id: string;
+    status: BuildJobStatus;
+    /** Repository URL as submitted. */
+    gitUrl: string;
+    /** Tag the built image gets on success; what the follow-up create uses. */
+    imageTag: string;
+    /** ISO 8601 timestamp (a Date on the backend, serialized by JSON). */
+    createdAt: string;
+    /** ISO 8601; set when the job reaches a terminal status. */
+    finishedAt?: string;
+    /** Most recent progress lines, oldest first, capped by the backend. */
+    logLines: string[];
+    /** The daemon's failure message; present only when status is 'failed'. */
+    errorMessage?: string;
+}

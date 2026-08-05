@@ -14,17 +14,17 @@
 
 import Docker from 'dockerode';
 
-import { isConnectionError, isEngineError } from './classify-dockerode-error.ts';
 import { toContainer, toContainerDetails } from './container-mapper.ts';
+import { DaemonRequestRunner } from './daemon-request-runner.ts';
 import { DockerApiError } from './docker-api-error.ts';
-import { DockerConnectionError } from './docker-connection-error.ts';
 import type {
     Container,
     ContainerDetails,
     ContainerLogs,
+    CreateContainerOptions,
     DeleteContainerOptions,
-    DockerDaemonLifecycle,
     DockerHostFiles,
+    DockerImageProvider,
     DockerManagerOptions,
     GetContainerLogsOptions,
     GetContainersOptions,
@@ -48,15 +48,17 @@ export class DockerManagerService {
     /** Endpoint this instance talks to, e.g. "http://127.0.0.1:2375". For logging and errors. */
     readonly baseUrl: string;
     private readonly docker: Docker;
-    private readonly daemon: DockerDaemonLifecycle | undefined;
+    private readonly requests: DaemonRequestRunner;
     private readonly hostFiles: DockerHostFiles | undefined;
+    private readonly images: DockerImageProvider | undefined;
 
     constructor(options: DockerManagerOptions = {}) {
         const endpoint = resolveDockerEndpoint(options);
 
         this.baseUrl = endpoint.baseUrl;
-        this.daemon = options.daemon;
+        this.requests = new DaemonRequestRunner(options.daemon, endpoint.baseUrl);
         this.hostFiles = options.hostFiles;
+        this.images = options.images;
 
         let timeout: number;
         if (options.requestTimeoutMs === undefined) {
@@ -101,7 +103,7 @@ export class DockerManagerService {
             listOptions.filters = options.filters;
         }
 
-        const infos = await this.withDaemon('GET /containers/json', () =>
+        const infos = await this.requests.run('GET /containers/json', () =>
             this.docker.listContainers(listOptions),
         );
         return infos.map(toContainer);
@@ -113,10 +115,77 @@ export class DockerManagerService {
      * accepts. Throws {@link DockerApiError} with status 404 when nothing matches.
      */
     async getContainerById(id: string): Promise<ContainerDetails> {
-        const info = await this.withDaemon(`GET /containers/${id}/json`, () =>
+        const info = await this.requests.run(`GET /containers/${id}/json`, () =>
             this.docker.getContainer(id).inspect(),
         );
         return toContainerDetails(info);
+    }
+
+    /**
+     * Creates and starts a container. Pulls `options.image` first when it is not
+     * available locally (needs the image provider; without one a missing image
+     * surfaces as the engine's 404). Throws {@link DockerApiError} with status
+     * 409 when a container with that name already exists. When the created
+     * container fails to start (typically a host port already taken), it is
+     * removed again before the start error is rethrown, so a retry under the
+     * same name is not blocked by a half-created leftover.
+     */
+    async createContainer(options: CreateContainerOptions): Promise<ContainerDetails> {
+        if (this.images !== undefined) {
+            await this.images.ensureImageExists(options.image);
+        }
+
+        const env: string[] = [];
+        for (const [name, value] of Object.entries(options.env)) {
+            env.push(`${name}=${value}`);
+        }
+
+        // The engine wants ports keyed "<port>/tcp"; several host ports may bind
+        // the same container port, so bindings are grouped under one key.
+        const exposedPorts: Record<string, object> = {};
+        const portBindings: Record<string, { HostPort: string }[]> = {};
+        for (const mapping of options.ports) {
+            const portKey = `${mapping.containerPort}/tcp`;
+            exposedPorts[portKey] = {};
+
+            let bindings = portBindings[portKey];
+            if (bindings === undefined) {
+                bindings = [];
+                portBindings[portKey] = bindings;
+            }
+            bindings.push({ HostPort: String(mapping.hostPort) });
+        }
+
+        const createOptions: Docker.ContainerCreateOptions = {
+            name: options.name,
+            Image: options.image,
+            Env: env,
+            Labels: { 'cloudplatform.managed': 'true' },
+            ExposedPorts: exposedPorts,
+            HostConfig: {
+                PortBindings: portBindings,
+                // Containers resume with the daemon (the WSL distro stops with the
+                // backend); stopped stays stopped.
+                RestartPolicy: { Name: 'unless-stopped' },
+            },
+        };
+
+        const created = await this.requests.run('POST /containers/create', () =>
+            this.docker.createContainer(createOptions),
+        );
+
+        try {
+            await this.startContainer(created.id);
+        } catch (startError) {
+            try {
+                await this.deleteContainer(created.id, { force: true });
+            } catch {
+                // Best effort — the start failure is the error worth reporting.
+            }
+            throw startError;
+        }
+
+        return this.getContainerById(created.id);
     }
 
     /**
@@ -147,7 +216,7 @@ export class DockerManagerService {
             v: removeVolumes,
         };
 
-        await this.withDaemon(`DELETE /containers/${id}`, () =>
+        await this.requests.run(`DELETE /containers/${id}`, () =>
             this.docker.getContainer(id).remove(removeOptions),
         );
     }
@@ -192,7 +261,7 @@ export class DockerManagerService {
             restartOptions.t = options.timeoutSeconds;
         }
 
-        await this.withDaemon(`POST /containers/${id}/restart`, () =>
+        await this.requests.run(`POST /containers/${id}/restart`, () =>
             this.docker.getContainer(id).restart(restartOptions),
         );
     }
@@ -232,7 +301,7 @@ export class DockerManagerService {
             logsOptions.since = toDaemonTimestamp(options.since);
         }
 
-        const payload = await this.withDaemon(`GET /containers/${id}/logs`, () =>
+        const payload = await this.requests.run(`GET /containers/${id}/logs`, () =>
             this.docker.getContainer(id).logs(logsOptions),
         );
         return { tty: tty, lines: parseContainerLogs(payload, tty) };
@@ -265,53 +334,18 @@ export class DockerManagerService {
     }
 
     /**
-     * Like withDaemon, for lifecycle endpoints where the engine answers 304 Not
-     * Modified when the container is already in the requested state — treated as
-     * success so start/stop are idempotent.
+     * Like the request runner, for lifecycle endpoints where the engine answers
+     * 304 Not Modified when the container is already in the requested state —
+     * treated as success so start/stop are idempotent.
      */
     private async withDaemonIdempotent(endpoint: string, fn: () => Promise<unknown>): Promise<void> {
         try {
-            await this.withDaemon(endpoint, fn);
+            await this.requests.run(endpoint, fn);
         } catch (error) {
             if (error instanceof DockerApiError && error.status === 304) {
                 return;
             }
             throw error;
         }
-    }
-
-    /**
-     * Runs a daemon request; when it fails because the daemon was unreachable, asks
-     * the lifecycle to bring the daemon up (booting WSL if needed) and retries once.
-     * Engine errors (404, 409, ...) pass through untouched.
-     */
-    private async withDaemon<T>(endpoint: string, fn: () => Promise<T>): Promise<T> {
-        try {
-            return await fn();
-        } catch (error) {
-            if (this.daemon === undefined || !isConnectionError(error)) {
-                throw this.translate(error, endpoint);
-            }
-            await this.daemon.ensureRunning(); // throws DockerConnectionError if boot fails
-            try {
-                return await fn();
-            } catch (retryError) {
-                throw this.translate(retryError, endpoint);
-            }
-        }
-    }
-
-    /** Maps a dockerode failure onto this module's error types. */
-    private translate(error: unknown, endpoint: string): Error {
-        if (isEngineError(error)) {
-            return new DockerApiError(error.message, error.statusCode, endpoint);
-        }
-        if (isConnectionError(error)) {
-            return new DockerConnectionError(this.baseUrl, error);
-        }
-        if (error instanceof Error) {
-            return error;
-        }
-        return new Error(String(error));
     }
 }

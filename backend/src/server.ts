@@ -11,14 +11,22 @@ import express from 'express';
 import { errorHandler } from './middleware/error-handler.ts';
 import { deleteContainerLogsRoute } from './routes/delete-container-logs.ts';
 import { deleteContainerRoute } from './routes/delete-container.ts';
+import { deleteImageRoute } from './routes/delete-image.ts';
+import { getBuildRoute } from './routes/get-build.ts';
 import { getContainerLogsRoute } from './routes/get-container-logs.ts';
 import { getContainerRoute } from './routes/get-container.ts';
 import { getContainersRoute } from './routes/get-containers.ts';
 import { getHealthRoute } from './routes/get-health.ts';
 import { getImagePresetsRoute } from './routes/get-image-presets.ts';
+import { getImagesRoute } from './routes/get-images.ts';
+import { postBuildRoute } from './routes/post-build.ts';
 import { postContainerRestartRoute } from './routes/post-container-restart.ts';
 import { postContainerStartRoute } from './routes/post-container-start.ts';
 import { postContainerStopRoute } from './routes/post-container-stop.ts';
+import { postContainerRoute } from './routes/post-container.ts';
+import { BuildJobRegistry } from './services/builds/build-job-registry.ts';
+import { ImageBuildService } from './services/builds/image-build-service.ts';
+import { DockerImageService } from './services/docker/docker-image-service.ts';
 import { DockerManagerService } from './services/docker/docker-manager-service.ts';
 import { resolveDockerEndpoint } from './services/docker/resolve-docker-endpoint.ts';
 import { ImagePresetService } from './services/images/image-preset-service.ts';
@@ -47,13 +55,22 @@ if (hostEnv !== undefined) {
 
 const endpoint = resolveDockerEndpoint();
 const daemon = bootstrapWslDocker(endpoint.baseUrl);
-const docker = new DockerManagerService({ daemon, hostFiles: new WslDockerHostFiles() });
+const dockerImages = new DockerImageService({ daemon });
+const docker = new DockerManagerService({
+    daemon: daemon,
+    hostFiles: new WslDockerHostFiles(),
+    images: dockerImages,
+});
 const imagePresets = new ImagePresetService();
+const buildRegistry = new BuildJobRegistry();
+const imageBuilds = new ImageBuildService(dockerImages, buildRegistry);
 
 const app = express();
+app.use(express.json());
 app.use(getHealthRoute(docker)); // liveness probe stays unversioned
 app.use('/api/v1', getContainersRoute(docker));
 app.use('/api/v1', getContainerRoute(docker));
+app.use('/api/v1', postContainerRoute(docker));
 app.use('/api/v1', deleteContainerRoute(docker));
 app.use('/api/v1', deleteContainerLogsRoute(docker));
 app.use('/api/v1', getContainerLogsRoute(docker));
@@ -61,6 +78,10 @@ app.use('/api/v1', postContainerStartRoute(docker));
 app.use('/api/v1', postContainerStopRoute(docker));
 app.use('/api/v1', postContainerRestartRoute(docker));
 app.use('/api/v1', getImagePresetsRoute(imagePresets));
+app.use('/api/v1', getImagesRoute(dockerImages));
+app.use('/api/v1', deleteImageRoute(dockerImages));
+app.use('/api/v1', postBuildRoute(imageBuilds));
+app.use('/api/v1', getBuildRoute(imageBuilds));
 app.use(errorHandler);
 
 const server = app.listen(port, host, () => {

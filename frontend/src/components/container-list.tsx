@@ -1,4 +1,5 @@
-import { Alert, Table, Tag, Tooltip } from 'antd';
+import { CloudOutlined } from '@ant-design/icons';
+import { Alert, Flex, Space, Switch, Table, Tag, Tooltip, Typography } from 'antd';
 import type { TableProps } from 'antd';
 import dayjs from 'dayjs';
 import relativeTime from 'dayjs/plugin/relativeTime';
@@ -15,30 +16,62 @@ import { formatPorts, formatTimestamp, stateTagColor } from './container-format.
 import ContainerRowActions from './container-row-actions.tsx';
 import type { ContainerListProps } from './interfaces.ts';
 
+/** Label stamped on every container the platform creates; the default view filters on it. */
+const MANAGED_LABEL = 'cloudplatform.managed';
+
 function formatCreatedAt(createdAt: string): string {
     return dayjs(createdAt).fromNow();
 }
 
+/** True when the container carries the platform's managed label. */
+function isManaged(container: Container): boolean {
+    return container.labels[MANAGED_LABEL] === 'true';
+}
+
+/** "Origin" cell: containers created through the platform get the cloud badge. */
+function renderOrigin(container: Container): ReactElement {
+    if (isManaged(container)) {
+        return (
+            <Space size={4}>
+                <CloudOutlined />
+                YCP
+            </Space>
+        );
+    }
+    return <span>device</span>;
+}
+
+/* Width-less columns (Name, Image) share the table's remaining space under the
+   fixed layout; the bounded columns hold their pixel widths. */
 const staticColumns: NonNullable<TableProps<Container>['columns']> = [
-    { title: 'Name', dataIndex: 'name', key: 'name' },
-    { title: 'Image', dataIndex: 'image', key: 'image' },
+    { title: 'Name', dataIndex: 'name', key: 'name', ellipsis: true },
+    { title: 'Image', dataIndex: 'image', key: 'image', ellipsis: true },
+    {
+        title: 'Origin',
+        key: 'origin',
+        width: 100,
+        render: (_value: unknown, record: Container) => renderOrigin(record),
+    },
     {
         title: 'State',
         dataIndex: 'state',
         key: 'state',
+        width: 110,
         render: (state: ContainerState) => <Tag color={stateTagColor(state)}>{state}</Tag>,
     },
-    { title: 'Status', dataIndex: 'status', key: 'status' },
+    { title: 'Status', dataIndex: 'status', key: 'status', width: 180 },
     {
         title: 'Ports',
         dataIndex: 'ports',
         key: 'ports',
+        width: 150,
         render: (ports: PortBinding[]) => formatPorts(ports),
     },
     {
         title: 'Created',
         dataIndex: 'createdAt',
         key: 'createdAt',
+        width: 130,
         render: (createdAt: string) => (
             <Tooltip title={formatTimestamp(createdAt)}>{formatCreatedAt(createdAt)}</Tooltip>
         ),
@@ -70,6 +103,7 @@ function ContainerList(props: ContainerListProps): ReactElement {
     const [errorMessage, setErrorMessage] = useState<string | null>(null);
     const [isLoading, setIsLoading] = useState<boolean>(true);
     const [reloadCounter, setReloadCounter] = useState<number>(0);
+    const [showAll, setShowAll] = useState<boolean>(false);
 
     useEffect(() => {
         let disposed: boolean = false;
@@ -115,21 +149,54 @@ function ContainerList(props: ContainerListProps): ReactElement {
         );
     }
     const columns: NonNullable<TableProps<Container>['columns']> = buildColumns(props.fetcher, handleMutated);
+
+    let visibleContainers: Container[];
+    if (showAll) {
+        visibleContainers = containers;
+    } else {
+        visibleContainers = containers.filter(
+            (container: Container) => isManaged(container),
+        );
+    }
+
+    /* When the managed-only filter is what emptied the table, say so instead of
+       showing the stock "No data" — an all-unmanaged daemon is not an error. */
+    let tableLocale: TableProps<Container>['locale'];
+    if (!showAll && containers.length > 0 && visibleContainers.length === 0) {
+        tableLocale = {
+            emptyText:
+                'No platform-managed containers. Turn on "Show all containers on this device" to see everything on the daemon.',
+        };
+    } else {
+        tableLocale = undefined;
+    }
+
     return (
-        <Table<Container>
-            className="app-container-table"
-            columns={columns}
-            dataSource={containers}
-            rowKey="id"
-            loading={isLoading}
-            pagination={false}
-            onRow={(record: Container) => ({
-                onClick: (): void => {
-                    navigate(`/services/${encodeURIComponent(record.name)}`);
-                },
-                style: { cursor: 'pointer' },
-            })}
-        />
+        <Flex vertical gap={12}>
+            <Flex justify="flex-start" align="center" gap={8}>
+                <Typography.Text>Show all containers on this device</Typography.Text>
+                <Switch
+                    checked={showAll}
+                    onChange={(checked: boolean) => setShowAll(checked)}
+                />
+            </Flex>
+            <Table<Container>
+                className="app-container-table"
+                tableLayout="fixed"
+                columns={columns}
+                dataSource={visibleContainers}
+                rowKey="id"
+                loading={isLoading}
+                pagination={false}
+                locale={tableLocale}
+                onRow={(record: Container) => ({
+                    onClick: (): void => {
+                        navigate(`/services/${encodeURIComponent(record.name)}`);
+                    },
+                    style: { cursor: 'pointer' },
+                })}
+            />
+        </Flex>
     );
 }
 

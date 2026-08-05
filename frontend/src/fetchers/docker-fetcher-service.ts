@@ -2,7 +2,16 @@ import axios from 'axios';
 import type { AxiosInstance, AxiosResponse } from 'axios';
 
 import { DockerFetcherError } from './docker-fetcher-error.ts';
-import type { Container, ContainerDetails, ContainerLogs, GetContainerLogsOptions } from './interfaces.ts';
+import type {
+    BuildJob,
+    Container,
+    ContainerDetails,
+    ContainerLogs,
+    CreateContainerRequest,
+    GetContainerLogsOptions,
+    ImagePreset,
+    ImageSummary,
+} from './interfaces.ts';
 
 /** Body the backend error handler sends (see backend/src/middleware/error-handler.ts). */
 interface ApiErrorBody {
@@ -19,6 +28,74 @@ export class DockerFetcherService {
     public async getContainers(): Promise<Container[]> {
         try {
             const response: AxiosResponse<Container[]> = await this.http.get('/containers');
+            return response.data;
+        } catch (error) {
+            throw this.toFetcherError(error);
+        }
+    }
+
+    public async getImagePresets(): Promise<ImagePreset[]> {
+        try {
+            const response: AxiosResponse<ImagePreset[]> = await this.http.get('/images/presets');
+            return response.data;
+        } catch (error) {
+            throw this.toFetcherError(error);
+        }
+    }
+
+    /** The platform-built images (labeled cloudplatform.managed=true); registry pulls never appear. */
+    public async getImages(): Promise<ImageSummary[]> {
+        try {
+            const response: AxiosResponse<ImageSummary[]> = await this.http.get('/images');
+            return response.data;
+        } catch (error) {
+            throw this.toFetcherError(error);
+        }
+    }
+
+    /** Removes a platform-built image; the backend answers 409 when it is unmanaged or still used by a container. */
+    public async deleteImage(id: string): Promise<void> {
+        try {
+            const encodedId: string = encodeURIComponent(id);
+            await this.http.delete(`/images/${encodedId}`);
+        } catch (error) {
+            throw this.toFetcherError(error);
+        }
+    }
+
+    /**
+     * Creates and starts a container. Synchronous on the backend: a missing image
+     * is pulled first, so this can take minutes on a first-time image (axios has
+     * no default timeout, so the call simply waits).
+     */
+    public async createContainer(request: CreateContainerRequest): Promise<ContainerDetails> {
+        try {
+            const response: AxiosResponse<ContainerDetails> = await this.http.post('/containers', request);
+            return response.data;
+        } catch (error) {
+            throw this.toFetcherError(error);
+        }
+    }
+
+    /**
+     * Starts a daemon-side build of a public GitHub repository. Answers
+     * immediately with the job; poll {@link getBuildJob} for progress. The
+     * backend answers 409 while another build is still running.
+     */
+    public async startBuild(gitUrl: string): Promise<BuildJob> {
+        try {
+            const response: AxiosResponse<BuildJob> = await this.http.post('/builds', { gitUrl: gitUrl });
+            return response.data;
+        } catch (error) {
+            throw this.toFetcherError(error);
+        }
+    }
+
+    /** One build job's snapshot; 404 when the id is unknown, expired, or lost to a restart. */
+    public async getBuildJob(id: string): Promise<BuildJob> {
+        try {
+            const encodedId: string = encodeURIComponent(id);
+            const response: AxiosResponse<BuildJob> = await this.http.get(`/builds/${encodedId}`);
             return response.data;
         } catch (error) {
             throw this.toFetcherError(error);

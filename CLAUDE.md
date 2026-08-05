@@ -48,15 +48,34 @@ standalone npm packages — no workspaces.
 Express 5. A request flows route → service → dockerode; errors flow back through the
 error handler.
 
-- `src/server.ts` — composition root: loads `.env`, builds the services, mounts routes
-  under `/api/v1` and the error handler last. No logic.
+- `src/server.ts` — composition root: loads `.env`, builds the services, mounts
+  `express.json()`, the routes under `/api/v1`, and the error handler last. No logic.
 - `src/middleware/error-handler.ts` — the only place service errors become HTTP:
-  `DockerApiError` → its status, `DockerConnectionError` → 503, anything else → 500.
-- `src/services/docker/` — `DockerManagerService`, a typed facade over the Docker
-  Engine API (dockerode). Public types in `interfaces.ts`; dockerode/daemon wire shapes
-  are quarantined in `container-mapper.ts` and `classify-dockerode-error.ts`. Every
-  daemon call runs through `withDaemon`, which asks the daemon lifecycle to boot the
-  daemon and retries once when the connection fails.
+  `ValidationError` and malformed JSON → 400, `DockerApiError` → its status,
+  `ImagePullError`/`BuildJobNotFoundError` → 404, `LogsNotClearableError`/
+  `BuildInProgressError`/`ImageNotManagedError` → 409, `DockerConnectionError` → 503,
+  anything else → 500.
+- `src/services/docker/` — the daemon-facing services. `DockerManagerService` is the
+  typed facade for container operations (list/inspect/create/start/stop/logs/delete);
+  `DockerImageService` owns image acquisition and lifecycle (exists-check, registry
+  pull, git build, plus list/delete of platform-built images — those labeled
+  `cloudplatform.managed=true`; deletes never pass force, so the daemon itself
+  refuses in-use images) with its own timeout-less dockerode client, since
+  pulls/builds run for minutes — hung streams are caught by
+  `drain-progress-stream.ts`'s idle watchdog instead. The manager consumes it
+  through the `DockerImageProvider` interface. Both run every daemon request
+  through `DaemonRequestRunner`, which asks the daemon lifecycle to boot the
+  daemon and retries once when the connection fails (stream draining stays
+  outside the runner — never retried). Public types in `interfaces.ts`;
+  dockerode/daemon wire shapes are quarantined in `container-mapper.ts`,
+  `image-mapper.ts`, `classify-dockerode-error.ts`, and `drain-progress-stream.ts`.
+- `src/services/builds/` — pollable build jobs over the image service:
+  `ImageBuildService.startBuild` answers immediately (202) and streams progress lines
+  into the in-memory `BuildJobRegistry`, which clients poll via `GET /builds/:id`.
+  One build runs at a time; finished jobs expire after 30 minutes. Creating the
+  container from the built tag is the client's follow-up `POST /containers` call.
+- `src/services/validation/` — hand-rolled request-body validators (no schema
+  library), one function per endpoint body, throwing `ValidationError` (→ 400).
 - `src/services/wsl/` — the WSL deployment adapters for the docker service's
   host-side contracts. `WslDockerDaemon` implements `DockerDaemonLifecycle`: boots
   the WSL distro on demand and holds it open (operational details under

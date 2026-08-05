@@ -249,6 +249,16 @@ export interface DockerHostFiles {
     truncateFile(absolutePath: string): Promise<void>;
 }
 
+/**
+ * The slice of image acquisition the manager depends on — kept as an interface
+ * (like {@link DockerDaemonLifecycle}) so the manager never imports the concrete
+ * image service. Implemented by `DockerImageService` in this folder.
+ */
+export interface DockerImageProvider {
+    /** Makes `reference` available locally, pulling it from its registry when missing. */
+    ensureImageExists(reference: string): Promise<void>;
+}
+
 export interface DockerManagerOptions {
     /** Defaults to DOCKER_HOST, else 127.0.0.1. */
     host?: string;
@@ -277,6 +287,39 @@ export interface DockerManagerOptions {
      * makes that operation fail; everything else works without it.
      */
     hostFiles?: DockerHostFiles;
+    /**
+     * Image acquisition, used by `createContainer` to pull a missing image before
+     * creating. Omitting it makes creating from a not-yet-pulled image surface the
+     * engine's 404; everything else works without it.
+     */
+    images?: DockerImageProvider;
+}
+
+/**
+ * Options for the image service. The endpoint fields mirror
+ * {@link DockerManagerOptions} so both services resolve the same daemon; there is
+ * deliberately no `requestTimeoutMs` — pulls and builds legitimately run for
+ * minutes, so the image service's client has no socket timeout at all (hung
+ * transfers are caught by the progress stream's idle watchdog instead).
+ */
+export interface DockerImageServiceOptions {
+    /** Defaults to DOCKER_HOST, else 127.0.0.1. */
+    host?: string;
+    /** Defaults to DOCKER_HOST, else 2375. */
+    port?: number;
+    /** Defaults to https when TLS material is supplied, otherwise http. */
+    protocol?: 'http' | 'https';
+    /** Pinned Engine API version, e.g. "v1.55". Omit to use the daemon's default. */
+    apiVersion?: string;
+    /** mTLS material for a `--tlsverify` daemon on 2376 (see {@link DockerManagerOptions}). */
+    ca?: string | Buffer;
+    cert?: string | Buffer;
+    key?: string | Buffer;
+    /**
+     * Lifecycle hook used when a request finds the daemon dead: the service calls
+     * `ensureRunning()` and retries the request once.
+     */
+    daemon?: DockerDaemonLifecycle;
 }
 
 export interface GetContainersOptions {
@@ -287,6 +330,51 @@ export interface GetContainersOptions {
      * Applied by the daemon, so this is cheaper than filtering the result.
      */
     filters?: Record<string, string[]>;
+}
+
+/** One host→container port publication. TCP only for now; the shape leaves room for a protocol field. */
+export interface PortMapping {
+    /** Port opened on the Windows host. */
+    hostPort: number;
+    /** Port the service listens on inside the container. */
+    containerPort: number;
+}
+
+export interface CreateContainerOptions {
+    /** Container name; also the DNS name on user-defined networks. */
+    name: string;
+    /** Image reference to create from, e.g. "redis:8". Pulled first when missing locally. */
+    image: string;
+    /** Ports to publish. Empty means the container runs with nothing published. */
+    ports: PortMapping[];
+    /** Environment variables by name; values are passed to the container verbatim. */
+    env: Record<string, string>;
+}
+
+export interface BuildImageFromGitOptions {
+    /**
+     * Git remote the daemon clones and builds, e.g.
+     * "https://github.com/owner/repo.git" with an optional "#branch" fragment.
+     * The clone happens inside the daemon — the backend host needs no git.
+     */
+    gitUrl: string;
+    /** Image tag applied when the build succeeds. */
+    tag: string;
+    /** Receives each human-readable progress line while the build streams. */
+    onProgressLine: (line: string) => void;
+}
+
+/** One image from the daemon's image list. */
+export interface ImageSummary {
+    id: string;
+    /** Repository tags, e.g. "cloudplatform/build-owner-repo:a1b2c3d4"; empty for dangling images. */
+    tags: string[];
+    createdAt: Date;
+    /** Image disk size in bytes, as reported by the daemon. */
+    sizeBytes: number;
+    labels: Record<string, string>;
+    /** Containers created from this image; -1 when the daemon does not compute the count. */
+    containers: number;
 }
 
 export interface DeleteContainerOptions {

@@ -23,7 +23,13 @@ function buildBreadcrumbItems(
         const childPrefix: string = item.path + '/';
         if (pathname.startsWith(childPrefix)) {
             const encodedLeaf: string = pathname.substring(childPrefix.length);
-            const leafTitle: string = decodeURIComponent(encodedLeaf);
+            let leafTitle: string = decodeURIComponent(encodedLeaf);
+            if (item.childLabels !== undefined) {
+                const mapped: string | undefined = item.childLabels[leafTitle];
+                if (mapped !== undefined) {
+                    leafTitle = mapped;
+                }
+            }
             return [
                 {
                     title: item.label,

@@ -1,13 +1,10 @@
-import { Result } from 'antd';
 import type { ReactElement } from 'react';
 
-function NewContainerPage(): ReactElement {
-    return (
-        <Result
-            status="info"
-            subTitle="Creating containers is coming soon — the backend does not expose this yet."
-        />
-    );
+import NewContainerWizard from '../components/new-container-wizard.tsx';
+import type { NewContainerPageProps } from './interfaces.ts';
+
+function NewContainerPage(props: NewContainerPageProps): ReactElement {
+    return <NewContainerWizard fetcher={props.fetcher} />;
 }
 
 export default NewContainerPage;
