@@ -11,9 +11,10 @@ import type {
     GetContainerLogsOptions,
     ImagePreset,
     ImageSummary,
+    StartBuildRequest,
 } from './interfaces.ts';
 
-/** Body the backend error handler sends (see backend/src/middleware/error-handler.ts). */
+/** Body the backend error handler sends (see platform-backend/src/middleware/error-handler.ts). */
 interface ApiErrorBody {
     message: string;
 }
@@ -78,13 +79,14 @@ export class DockerFetcherService {
     }
 
     /**
-     * Starts a daemon-side build of a public GitHub repository. Answers
-     * immediately with the job; poll {@link getBuildJob} for progress. The
-     * backend answers 409 while another build is still running.
+     * Enqueues a build of a public GitHub repository together with the
+     * container to create from it. Answers immediately with the 'queued' job;
+     * poll {@link getBuildJob} while the builder service works the queue. The
+     * backend answers 429 when the queue is full.
      */
-    public async startBuild(gitUrl: string): Promise<BuildJob> {
+    public async startBuild(request: StartBuildRequest): Promise<BuildJob> {
         try {
-            const response: AxiosResponse<BuildJob> = await this.http.post('/builds', { gitUrl: gitUrl });
+            const response: AxiosResponse<BuildJob> = await this.http.post('/builds', request);
             return response.data;
         } catch (error) {
             throw this.toFetcherError(error);

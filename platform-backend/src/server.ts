@@ -20,12 +20,15 @@ import { getHealthRoute } from './routes/get-health.ts';
 import { getImagePresetsRoute } from './routes/get-image-presets.ts';
 import { getImagesRoute } from './routes/get-images.ts';
 import { postBuildRoute } from './routes/post-build.ts';
+import { postBuildsQueueClaimRoute } from './routes/post-builds-queue-claim.ts';
+import { postBuildsQueueLogsRoute } from './routes/post-builds-queue-logs.ts';
+import { postBuildsQueueResultRoute } from './routes/post-builds-queue-result.ts';
 import { postContainerRestartRoute } from './routes/post-container-restart.ts';
 import { postContainerStartRoute } from './routes/post-container-start.ts';
 import { postContainerStopRoute } from './routes/post-container-stop.ts';
 import { postContainerRoute } from './routes/post-container.ts';
 import { BuildJobRegistry } from './services/builds/build-job-registry.ts';
-import { ImageBuildService } from './services/builds/image-build-service.ts';
+import { BuildQueueService } from './services/builds/build-queue-service.ts';
 import { DockerImageService } from './services/docker/docker-image-service.ts';
 import { DockerManagerService } from './services/docker/docker-manager-service.ts';
 import { resolveDockerEndpoint } from './services/docker/resolve-docker-endpoint.ts';
@@ -53,6 +56,14 @@ if (hostEnv !== undefined) {
     host = hostEnv;
 }
 
+// How long a running build may go silent before the sweep declares it abandoned.
+// Overridable mainly so verification can exercise the sweep quickly.
+let staleTimeoutMs: number | undefined = undefined;
+const staleTimeoutEnv = process.env['BUILD_STALE_TIMEOUT_MS'];
+if (staleTimeoutEnv !== undefined) {
+    staleTimeoutMs = Number(staleTimeoutEnv);
+}
+
 const endpoint = resolveDockerEndpoint();
 const daemon = bootstrapWslDocker(endpoint.baseUrl);
 const dockerImages = new DockerImageService({ daemon });
@@ -63,7 +74,7 @@ const docker = new DockerManagerService({
 });
 const imagePresets = new ImagePresetService();
 const buildRegistry = new BuildJobRegistry();
-const imageBuilds = new ImageBuildService(dockerImages, buildRegistry);
+const imageBuilds = new BuildQueueService(buildRegistry, daemon, staleTimeoutMs);
 
 const app = express();
 app.use(express.json());
@@ -82,15 +93,20 @@ app.use('/api/v1', getImagesRoute(dockerImages));
 app.use('/api/v1', deleteImageRoute(dockerImages));
 app.use('/api/v1', postBuildRoute(imageBuilds));
 app.use('/api/v1', getBuildRoute(imageBuilds));
+app.use('/api/v1', postBuildsQueueClaimRoute(imageBuilds));
+app.use('/api/v1', postBuildsQueueLogsRoute(imageBuilds));
+app.use('/api/v1', postBuildsQueueResultRoute(imageBuilds));
 app.use(errorHandler);
 
 const server = app.listen(port, host, () => {
-    console.log(`backend listening on http://${host}:${port} -> docker at ${docker.baseUrl}`);
+    console.log(`platform-backend listening on http://${host}:${port} -> docker at ${docker.baseUrl}`);
 });
+imageBuilds.start();
 
 const shutdownSignals: NodeJS.Signals[] = ['SIGINT', 'SIGTERM'];
 for (const signal of shutdownSignals) {
     process.on(signal, () => {
+        imageBuilds.stop();
         daemon.stop();
         server.close(() => process.exit(0));
         // Fallback if connections linger past close.

@@ -351,19 +351,6 @@ export interface CreateContainerOptions {
     env: Record<string, string>;
 }
 
-export interface BuildImageFromGitOptions {
-    /**
-     * Git remote the daemon clones and builds, e.g.
-     * "https://github.com/owner/repo.git" with an optional "#branch" fragment.
-     * The clone happens inside the daemon — the backend host needs no git.
-     */
-    gitUrl: string;
-    /** Image tag applied when the build succeeds. */
-    tag: string;
-    /** Receives each human-readable progress line while the build streams. */
-    onProgressLine: (line: string) => void;
-}
-
 /** One image from the daemon's image list. */
 export interface ImageSummary {
     id: string;

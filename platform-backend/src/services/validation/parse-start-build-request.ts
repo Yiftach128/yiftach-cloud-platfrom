@@ -1,11 +1,19 @@
 /**
- * Validates the POST /builds request body and parses the GitHub URL into the
- * parts the build service needs. Public repository root URLs only:
+ * Validates the POST /builds request body: the GitHub URL is parsed into the
+ * parts the build queue needs, and the container config (name/ports/env — the
+ * container the builder creates after the build) rides along, checked by the
+ * same field rules as POST /containers. Public repository root URLs only:
  * "https://github.com/owner/repository", optionally with ".git" and/or a
  * "#branch-or-tag" fragment. Throws {@link ValidationError} (→ 400) otherwise.
  */
 
 import type { StartBuildOptions } from '../builds/interfaces.ts';
+import type { PortMapping } from '../docker/interfaces.ts';
+import {
+    parseContainerName,
+    parseEnvVars,
+    parsePortMappings,
+} from './parse-container-fields.ts';
 import { ValidationError } from './validation-error.ts';
 
 const REPO_SEGMENT_PATTERN = /^[A-Za-z0-9_.-]+$/;
@@ -70,7 +78,16 @@ export function parseStartBuildRequest(body: unknown): StartBuildOptions {
         gitRef = fragment;
     }
 
-    const options: StartBuildOptions = { gitUrl: raw.trim(), owner: owner, repo: repo };
+    const name: string = parseContainerName(record['name']);
+    const ports: PortMapping[] = parsePortMappings(record['ports']);
+    const env: Record<string, string> = parseEnvVars(record['env']);
+
+    const options: StartBuildOptions = {
+        gitUrl: raw.trim(),
+        owner: owner,
+        repo: repo,
+        container: { name: name, ports: ports, env: env },
+    };
     if (gitRef !== undefined) {
         options.gitRef = gitRef;
     }

@@ -1,7 +1,7 @@
 import type { ErrorRequestHandler } from 'express';
 
-import { BuildInProgressError } from '../services/builds/build-in-progress-error.ts';
 import { BuildJobNotFoundError } from '../services/builds/build-job-not-found-error.ts';
+import { BuildQueueFullError } from '../services/builds/build-queue-full-error.ts';
 import { DockerApiError } from '../services/docker/docker-api-error.ts';
 import { DockerConnectionError } from '../services/docker/docker-connection-error.ts';
 import { ImageNotManagedError } from '../services/docker/image-not-managed-error.ts';
@@ -27,8 +27,8 @@ export const errorHandler: ErrorRequestHandler = (error, _req, res, _next) => {
         res.status(404).json({ message: error.message });
         return;
     }
-    if (error instanceof BuildInProgressError) {
-        res.status(409).json({ message: error.message });
+    if (error instanceof BuildQueueFullError) {
+        res.status(429).json({ message: error.message });
         return;
     }
     if (error instanceof BuildJobNotFoundError) {

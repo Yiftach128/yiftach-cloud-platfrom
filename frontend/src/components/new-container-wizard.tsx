@@ -4,11 +4,13 @@ import type { ReactElement } from 'react';
 import { Navigate, useNavigate, useParams, useSearchParams } from 'react-router';
 
 import type {
+    BuildJob,
     ContainerDetails,
     CreateContainerRequest,
     ImagePreset,
     PortMappingRequest,
     PresetEnvVar,
+    StartBuildRequest,
 } from '../fetchers/interfaces.ts';
 import BuildProgressPanel from './build-progress-panel.tsx';
 import ContainerConfigForm from './container-config-form.tsx';
@@ -57,15 +59,17 @@ function buildInitialValues(preset: ImagePreset | null): ContainerConfigFormValu
     };
 }
 
-function toCreateRequest(values: ContainerConfigFormValues, image: string): CreateContainerRequest {
+function toPortRequests(rows: PortRowValue[]): PortMappingRequest[] {
     const ports: PortMappingRequest[] = [];
-    for (const row of values.ports) {
-        const portRow: PortRowValue = row;
-        if (portRow.hostPort !== undefined && portRow.containerPort !== undefined) {
-            ports.push({ hostPort: portRow.hostPort, containerPort: portRow.containerPort });
+    for (const row of rows) {
+        if (row.hostPort !== undefined && row.containerPort !== undefined) {
+            ports.push({ hostPort: row.hostPort, containerPort: row.containerPort });
         }
     }
+    return ports;
+}
 
+function toEnvRecord(values: ContainerConfigFormValues): Record<string, string> {
     // Blank values are omitted, never sent as empty strings — an empty
     // MONGO_INITDB_ROOT_PASSWORD is not the same as an unset one.
     const env: Record<string, string> = {};
@@ -82,8 +86,25 @@ function toCreateRequest(values: ContainerConfigFormValues, image: string): Crea
             env[envRow.name] = envRow.value;
         }
     }
+    return env;
+}
 
-    return { name: values.name, image: image, ports: ports, env: env };
+function toCreateRequest(values: ContainerConfigFormValues, image: string): CreateContainerRequest {
+    return {
+        name: values.name,
+        image: image,
+        ports: toPortRequests(values.ports),
+        env: toEnvRecord(values),
+    };
+}
+
+function toStartBuildRequest(values: ContainerConfigFormValues, gitUrl: string): StartBuildRequest {
+    return {
+        gitUrl: gitUrl,
+        name: values.name,
+        ports: toPortRequests(values.ports),
+        env: toEnvRecord(values),
+    };
 }
 
 /**
@@ -92,10 +113,12 @@ function toCreateRequest(values: ContainerConfigFormValues, image: string): Crea
  * fill the shared config form, create. The step lives in the URL
  * (/containers/new/:source?), so the header breadcrumb both reflects and
  * drives it — its root crumb navigates back to the card screen. Preset and
- * image creates are one synchronous call; the GitHub source first runs a
- * build job (watched by {@link BuildProgressPanel}) and creates from the
- * built tag when it succeeds. The form is remounted (via `key`) whenever the
- * source or the chosen preset changes, so its initialValues re-apply.
+ * image creates are one synchronous call; the GitHub source enqueues a build
+ * job carrying the whole container config — the builder service builds the
+ * image and creates the container server-side, while this wizard just watches
+ * the job (via {@link BuildProgressPanel}) and opens the container when the
+ * job succeeds. The form is remounted (via `key`) whenever the source or the
+ * chosen preset changes, so its initialValues re-apply.
  */
 function NewContainerWizard(props: NewContainerWizardProps): ReactElement {
     const app = AntdApp.useApp();
@@ -156,7 +179,9 @@ function NewContainerWizard(props: NewContainerWizardProps): ReactElement {
             }
             setPending(true);
             try {
-                const job = await props.fetcher.startBuild(values.gitUrl.trim());
+                const job = await props.fetcher.startBuild(
+                    toStartBuildRequest(values, values.gitUrl.trim()),
+                );
                 setSavedValues(values);
                 setBuildJobId(job.id);
                 setPhase('building');
@@ -190,19 +215,11 @@ function NewContainerWizard(props: NewContainerWizardProps): ReactElement {
         }
     }
 
-    async function handleBuildSucceeded(imageTag: string): Promise<void> {
-        if (savedValues === null) {
-            return;
-        }
-        setPhase('creating');
-        try {
-            await createAndOpen(savedValues, imageTag);
-        } catch (error) {
-            /* The built image survives; going back retries only the create
-               (resubmitting rebuilds, but BuildKit's cache makes that cheap). */
-            app.message.error(toErrorText(error));
-            setPhase('configure');
-        }
+    function handleBuildSucceeded(job: BuildJob): void {
+        /* The builder already created the container before the job turned
+           'succeeded' — nothing left to do but open it. */
+        app.message.success('Container created');
+        navigate(`/services/${encodeURIComponent(job.containerName)}`);
     }
 
     function handleBuildBack(): void {
@@ -224,14 +241,13 @@ function NewContainerWizard(props: NewContainerWizardProps): ReactElement {
     }
 
     /* Only the GitHub step shows the running build; navigating to another step
-       mid-build shows that step while the daemon keeps building, and returning
+       mid-build shows that step while the builder keeps working, and returning
        here re-mounts the panel, which resumes polling the same job. */
     if (sourceKind === 'github' && phase !== 'configure' && buildJobId !== null) {
         return (
             <BuildProgressPanel
                 fetcher={props.fetcher}
                 jobId={buildJobId}
-                creating={phase === 'creating'}
                 onSucceeded={handleBuildSucceeded}
                 onBack={handleBuildBack}
             />

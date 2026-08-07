@@ -1,7 +1,7 @@
 import type { ReactElement } from 'react';
 
 import type { DockerFetcherService } from '../fetchers/docker-fetcher-service.ts';
-import type { ContainerState, ImagePreset, PresetEnvVar } from '../fetchers/interfaces.ts';
+import type { BuildJob, ContainerState, ImagePreset, PresetEnvVar } from '../fetchers/interfaces.ts';
 
 export interface ContainerListProps {
     fetcher: DockerFetcherService;
@@ -134,19 +134,18 @@ export interface ContainerConfigFormProps {
 }
 
 /**
- * Where the GitHub flow stands: filling the form, watching the build job, or
- * creating the container from the built image.
+ * Where the GitHub flow stands: filling the form, or watching the build job
+ * (the builder service creates the container server-side before the job
+ * reports success, so there is no separate creating phase anymore).
  */
-export type NewContainerPhase = 'configure' | 'building' | 'creating';
+export type NewContainerPhase = 'configure' | 'building';
 
 export interface BuildProgressPanelProps {
     fetcher: DockerFetcherService;
     /** Build job to poll. */
     jobId: string;
-    /** True while the follow-up container create runs (shown under the log). */
-    creating: boolean;
-    /** Called once when the job reaches 'succeeded', with the built image tag. */
-    onSucceeded: (imageTag: string) => void;
+    /** Called once when the job reaches 'succeeded' (the container exists by then). */
+    onSucceeded: (job: BuildJob) => void;
     /** Returns to the config form (offered after a failed or lost build). */
     onBack: () => void;
 }

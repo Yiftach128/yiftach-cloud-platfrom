@@ -1,4 +1,4 @@
-import { Alert, Badge, Button, Flex, Skeleton, Spin, Typography } from 'antd';
+import { Alert, Badge, Button, Flex, Skeleton, Typography } from 'antd';
 import { useEffect, useRef, useState } from 'react';
 import type { ReactElement, UIEvent } from 'react';
 
@@ -16,16 +16,18 @@ const PINNED_THRESHOLD_PX: number = 40;
 /**
  * Watches one build job: polls its snapshot (the backend keeps the whole
  * picture, so every poll replaces the previous one — no cursor needed, unlike
- * the container log tail) and renders the progress lines terminal-style.
- * Polling stops on a terminal status; success is reported upward exactly once
- * so the wizard can create the container from the built tag.
+ * the container log tail) and renders the progress lines terminal-style. A
+ * 'queued' job just waits its turn — the builder service works the queue
+ * oldest-first. Polling stops on a terminal status; success is reported
+ * upward exactly once so the wizard can open the created container (the
+ * builder created it before the job turned 'succeeded').
  */
 function BuildProgressPanel(props: BuildProgressPanelProps): ReactElement {
     const [job, setJob] = useState<BuildJob | null>(null);
     const [errorMessage, setErrorMessage] = useState<string | null>(null);
     const [isLoading, setIsLoading] = useState<boolean>(true);
     const [jobLost, setJobLost] = useState<boolean>(false);
-    const [succeededTag, setSucceededTag] = useState<string | null>(null);
+    const [succeededJob, setSucceededJob] = useState<BuildJob | null>(null);
 
     const pinnedToBottom = useRef<boolean>(true);
     const bottomSentinel = useRef<HTMLDivElement | null>(null);
@@ -40,7 +42,7 @@ function BuildProgressPanel(props: BuildProgressPanelProps): ReactElement {
         setErrorMessage(null);
         setIsLoading(true);
         setJobLost(false);
-        setSucceededTag(null);
+        setSucceededJob(null);
         pinnedToBottom.current = true;
         successReported.current = false;
 
@@ -57,7 +59,7 @@ function BuildProgressPanel(props: BuildProgressPanelProps): ReactElement {
                 setErrorMessage(null);
                 setIsLoading(false);
                 if (fresh.status === 'succeeded') {
-                    setSucceededTag(fresh.imageTag); // handled by the effect below
+                    setSucceededJob(fresh); // handled by the effect below
                     return;
                 }
                 if (fresh.status === 'failed') {
@@ -100,11 +102,11 @@ function BuildProgressPanel(props: BuildProgressPanelProps): ReactElement {
        onSucceeded prop is the one that runs. The ref keeps it exactly-once even
        though `props` (in the deps) changes identity on every parent render. */
     useEffect(() => {
-        if (succeededTag !== null && !successReported.current) {
+        if (succeededJob !== null && !successReported.current) {
             successReported.current = true;
-            props.onSucceeded(succeededTag);
+            props.onSucceeded(succeededJob);
         }
-    }, [succeededTag, props]);
+    }, [succeededJob, props]);
 
     useEffect(() => {
         /* Follow the tail, but only while the user has not scrolled up. */
@@ -122,6 +124,8 @@ function BuildProgressPanel(props: BuildProgressPanelProps): ReactElement {
     let statusBadge: ReactElement;
     if (jobLost) {
         statusBadge = <Badge status="error" text="Lost" />;
+    } else if (job !== null && job.status === 'queued') {
+        statusBadge = <Badge status="default" text="Queued" />;
     } else if (job !== null && job.status === 'succeeded') {
         statusBadge = <Badge status="success" text="Build succeeded" />;
     } else if (job !== null && job.status === 'failed') {
@@ -153,7 +157,7 @@ function BuildProgressPanel(props: BuildProgressPanelProps): ReactElement {
             if (job.errorMessage !== undefined) {
                 description = job.errorMessage;
             } else {
-                description = 'The daemon reported no failure detail.';
+                description = 'The build reported no failure detail.';
             }
             failureAlert = <Alert type="error" showIcon message="Build failed" description={description} />;
         } else if (errorMessage !== null) {
@@ -162,7 +166,13 @@ function BuildProgressPanel(props: BuildProgressPanelProps): ReactElement {
 
         let lineContent: ReactElement;
         if (job.logLines.length === 0) {
-            lineContent = <div style={{ color: '#d4d4d4' }}>Waiting for the first build output…</div>;
+            let placeholder: string;
+            if (job.status === 'queued') {
+                placeholder = 'Waiting for the builder to pick up this job…';
+            } else {
+                placeholder = 'Waiting for the first build output…';
+            }
+            lineContent = <div style={{ color: '#d4d4d4' }}>{placeholder}</div>;
         } else {
             /* Index keys are safe: the backend only appends, or trims from the
                front in bulk at its line cap. */
@@ -177,14 +187,7 @@ function BuildProgressPanel(props: BuildProgressPanelProps): ReactElement {
         }
 
         let footer: ReactElement | null = null;
-        if (props.creating) {
-            footer = (
-                <Flex gap={8} align="center">
-                    <Spin size="small" />
-                    <Typography.Text>Build succeeded — creating the container…</Typography.Text>
-                </Flex>
-            );
-        } else if (job.status === 'failed' || jobLost) {
+        if (job.status === 'failed' || jobLost) {
             footer = <Button onClick={props.onBack}>Back</Button>;
         }
 

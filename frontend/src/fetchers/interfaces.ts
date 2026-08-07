@@ -1,6 +1,6 @@
 /**
  * Wire types for the backend Docker API (/api/v1), mirroring
- * backend/src/services/docker/interfaces.ts.
+ * platform-backend/src/services/docker/interfaces.ts.
  *
  * Kept as a hand-maintained copy on purpose: the two packages share no build,
  * and the shapes differ where JSON serialization flattens them (the backend's
@@ -260,7 +260,7 @@ export interface ContainerLogs {
 
 /**
  * One environment variable a preset's image understands (mirrors
- * backend/src/services/images/interfaces.ts).
+ * platform-backend/src/services/images/interfaces.ts).
  */
 export interface PresetEnvVar {
     /** Variable name exactly as the image expects it, e.g. "POSTGRES_PASSWORD". */
@@ -318,22 +318,41 @@ export interface CreateContainerRequest {
     env: Record<string, string>;
 }
 
-export type BuildJobStatus = 'running' | 'succeeded' | 'failed';
+export type BuildJobStatus = 'queued' | 'running' | 'succeeded' | 'failed';
 
-/** One daemon-side git build (mirrors backend/src/services/builds/interfaces.ts). */
+/**
+ * Body of POST /builds: the repository to build plus the container the
+ * builder service creates from the built image when the build succeeds.
+ */
+export interface StartBuildRequest {
+    /** Public GitHub repository root URL, optionally with a "#branch-or-tag" fragment. */
+    gitUrl: string;
+    name: string;
+    ports: PortMappingRequest[];
+    env: Record<string, string>;
+}
+
+/**
+ * One queued/running/finished image build, worked off by the builder service
+ * (mirrors platform-backend/src/services/builds/interfaces.ts). On success
+ * the container named `containerName` already exists — the builder created it
+ * before the job turned 'succeeded'.
+ */
 export interface BuildJob {
     id: string;
     status: BuildJobStatus;
     /** Repository URL as submitted. */
     gitUrl: string;
-    /** Tag the built image gets on success; what the follow-up create uses. */
+    /** Tag the built image gets on success. */
     imageTag: string;
+    /** Name of the container created after a successful build. */
+    containerName: string;
     /** ISO 8601 timestamp (a Date on the backend, serialized by JSON). */
     createdAt: string;
     /** ISO 8601; set when the job reaches a terminal status. */
     finishedAt?: string;
     /** Most recent progress lines, oldest first, capped by the backend. */
     logLines: string[];
-    /** The daemon's failure message; present only when status is 'failed'. */
+    /** The failure message; present only when status is 'failed'. */
     errorMessage?: string;
 }

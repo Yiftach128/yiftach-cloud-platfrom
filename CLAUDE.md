@@ -1,15 +1,17 @@
 # Yiftach Cloud Platform
 
-Self-hosted cloud control panel. Backend lives in `backend/` (Node 24 + TypeScript, ESM,
-no build step — Node strips types natively, so imports use real `.ts` extensions).
-Frontend lives in `frontend/` (React 19 + TypeScript + Vite, Ant Design UI). The two are
-standalone npm packages — no workspaces.
+Self-hosted cloud control panel, built as three standalone npm packages — no workspaces.
+The platform backend lives in `platform-backend/` (Node 24 + TypeScript, ESM, no build
+step — Node strips types natively, so imports use real `.ts` extensions). The builder
+service lives in `builder-service-backend/` (same Node 24 + TS style — a headless worker
+that performs image builds; no HTTP server). The frontend lives in `frontend/`
+(React 19 + TypeScript + Vite, Ant Design UI).
 
 ## Code conventions
 
 - **Types live in `interfaces.ts`, not in service files.** Each service folder (e.g.
-  `backend/src/services/docker/`) keeps its public interfaces and type aliases in an
-  `interfaces.ts` file next to the implementation. Service files import from it and
+  `platform-backend/src/services/docker/`) keeps its public interfaces and type aliases
+  in an `interfaces.ts` file next to the implementation. Service files import from it and
   contain only implementation. Exception: private types that describe a third-party
   library's wire format (e.g. dockerode response shapes) stay in the implementation
   file so `interfaces.ts` never depends on the underlying library.
@@ -21,7 +23,8 @@ standalone npm packages — no workspaces.
   npm reformats it on every install.
 - **Never put a service file directly in `src/`.** Every service lives in a domain
   folder under `src/services/` (e.g. `src/services/docker/docker-manager-service.ts`).
-  Only entry points (like `server.ts`) belong at the `src/` root.
+  Only entry points (like `server.ts`, `main.ts`) and startup wiring (`config.ts`)
+  belong at the `src/` root.
 - **Routes are thin — one file per endpoint.** Each endpoint gets its own file in
   `src/routes/`, named `<method>-<name>.ts` (e.g. `get-containers.ts`), exporting a
   factory that takes its service dependencies and returns an Express `Router`. A route
@@ -42,8 +45,12 @@ standalone npm packages — no workspaces.
   each value into a named local with explicit `if`/`else` first, then build the object.
   Type declarations (interfaces, unions, generics, optional `?:` properties) are not
   affected — they have no Java equivalent and stay idiomatic TypeScript.
+  Two carve-outs: `config.ts` env-resolution files may use `||` defaulting
+  (`process.env.X || "default"`), and boolean logic with `||`/`&&` inside conditions
+  (`if (a || b && c)`) is always fine — the ban covers truthiness *defaulting* for
+  value resolution, not boolean tests.
 
-## Backend architecture
+## Platform backend architecture (`platform-backend/`)
 
 Express 5. A request flows route → service → dockerode; errors flow back through the
 error handler.
@@ -53,15 +60,15 @@ error handler.
 - `src/middleware/error-handler.ts` — the only place service errors become HTTP:
   `ValidationError` and malformed JSON → 400, `DockerApiError` → its status,
   `ImagePullError`/`BuildJobNotFoundError` → 404, `LogsNotClearableError`/
-  `BuildInProgressError`/`ImageNotManagedError` → 409, `DockerConnectionError` → 503,
-  anything else → 500.
+  `ImageNotManagedError` → 409, `BuildQueueFullError` → 429,
+  `DockerConnectionError` → 503, anything else → 500.
 - `src/services/docker/` — the daemon-facing services. `DockerManagerService` is the
   typed facade for container operations (list/inspect/create/start/stop/logs/delete);
   `DockerImageService` owns image acquisition and lifecycle (exists-check, registry
-  pull, git build, plus list/delete of platform-built images — those labeled
+  pull, plus list/delete of platform-built images — those labeled
   `cloudplatform.managed=true`; deletes never pass force, so the daemon itself
   refuses in-use images) with its own timeout-less dockerode client, since
-  pulls/builds run for minutes — hung streams are caught by
+  pulls run for minutes — hung streams are caught by
   `drain-progress-stream.ts`'s idle watchdog instead. The manager consumes it
   through the `DockerImageProvider` interface. Both run every daemon request
   through `DaemonRequestRunner`, which asks the daemon lifecycle to boot the
@@ -69,19 +76,56 @@ error handler.
   outside the runner — never retried). Public types in `interfaces.ts`;
   dockerode/daemon wire shapes are quarantined in `container-mapper.ts`,
   `image-mapper.ts`, `classify-dockerode-error.ts`, and `drain-progress-stream.ts`.
-- `src/services/builds/` — pollable build jobs over the image service:
-  `ImageBuildService.startBuild` answers immediately (202) and streams progress lines
-  into the in-memory `BuildJobRegistry`, which clients poll via `GET /builds/:id`.
-  One build runs at a time; finished jobs expire after 30 minutes. Creating the
-  container from the built tag is the client's follow-up `POST /containers` call.
+  Image *builds* do not happen in this process — they belong to the builder service.
+- `src/services/builds/` — the FIFO build queue the builder service works off:
+  `POST /builds` enqueues (202, status `queued`; 429 past 10 waiting jobs) with the
+  whole container config riding along; clients poll `GET /builds/:id`. The builder
+  claims the oldest queued job via `POST /builds-queue/claim` (204 when empty; the
+  claim also fire-and-forgets a WSL daemon warm-up), appends progress lines via
+  `POST /builds-queue/:id/logs`, creates the container through the normal
+  `POST /containers`, and reports via `POST /builds-queue/:id/result` (the first
+  terminal status wins). A running job untouched for 10 minutes
+  (`BUILD_STALE_TIMEOUT_MS`) is failed by the sweeper so the UI never hangs; finished
+  jobs expire after 30 minutes; a restart forgets all jobs (pollers get 404, and the
+  builder abandons in-flight work on that same 404).
 - `src/services/validation/` — hand-rolled request-body validators (no schema
   library), one function per endpoint body, throwing `ValidationError` (→ 400).
+  The container name/ports/env field rules live once in `parse-container-fields.ts`,
+  shared by the create-container and start-build parsers.
 - `src/services/wsl/` — the WSL deployment adapters for the docker service's
   host-side contracts. `WslDockerDaemon` implements `DockerDaemonLifecycle`: boots
   the WSL distro on demand and holds it open (operational details under
   Verification); `bootstrapWslDocker` builds it and starts a background warm-up.
   `WslDockerHostFiles` implements `DockerHostFiles`: daemon-host file operations
   (log clearing) via `wsl.exe -u root`.
+
+## Builder service architecture (`builder-service-backend/`)
+
+A headless polling worker — no HTTP server, so no routes and no error handler; the
+backend code conventions apply. It runs alongside the platform via `npm start` today
+and is designed to run as a container later (its `Dockerfile` exists; a compose file
+is a future phase). One task at a time: claim → clone → build → create container →
+report, then poll again.
+
+- `src/main.ts` — entry point; `src/config.ts` — env-driven `Config`, logged at
+  startup (`PLATFORM_API_URL`, `DOCKER_HOST`, `POLL_INTERVAL_MS`, `WORKSPACE_DIR`,
+  `GIT_CLONE_TIMEOUT_MS`; defaults suit local dev).
+- `src/services/platform/` — `PlatformApiClient`, the only door to the platform API
+  (axios, styled after the frontend's `DockerFetcherService`; axios never leaks).
+  A 404 on a job-scoped call becomes `BuildJobLostError` — the single abandon signal
+  (the platform restarted and forgot the job).
+- `src/services/git/` — `GitCloneService` shallow-clones with the git CLI
+  (`--depth 1 --single-branch --no-tags`, prompts disabled, `--` before the URL,
+  killed at `GIT_CLONE_TIMEOUT_MS`). The host running the builder needs `git` on PATH.
+- `src/services/docker/` — `ImageBuilderService` streams the cloned directory
+  (minus `.git`) to the daemon as a tar build context (BuildKit, `version: '2'`,
+  labels the image `cloudplatform.managed=true`). The daemon never runs git.
+  `drain-progress-stream.ts` and `decode-buildkit-log-line.ts` here are deliberate
+  copies of the platform's docker-folder logic (`drain-progress-stream.ts` exists in
+  both packages **byte-identically** — no workspaces, so edits must touch both).
+- `src/services/worker/` — `BuildWorker` (the serial loop; always deletes the clone
+  workspace in `finally`) and `LogBatcher` (flushes log lines to the platform about
+  once a second; records a 404 instead of throwing from the timer).
 
 ## Frontend architecture
 
@@ -94,8 +138,12 @@ classes; JSX files use `.tsx`).
 - `src/components/` — one component per file (e.g. `container-list.tsx`).
 - `src/fetchers/` — all backend API access. `DockerFetcherService` (axios) throws only
   `DockerFetcherError`, so axios never leaks into components. Wire types in
-  `fetchers/interfaces.ts` mirror the backend's `interfaces.ts`, except JSON-serialized
-  fields (backend `Date` → frontend ISO `string`).
+  `fetchers/interfaces.ts` mirror the platform backend's `interfaces.ts`, except
+  JSON-serialized fields (backend `Date` → frontend ISO `string`).
+- The GitHub source in the new-container wizard submits the build **and** the container
+  config in one `POST /builds`; the builder service creates the container server-side,
+  so the wizard only watches the job (`queued` → `running` → terminal) and navigates to
+  the container when it succeeds. It never calls `POST /containers` for that source.
 - The dev server proxies `/api` → `http://127.0.0.1:3000` (`vite.config.ts`); the backend
   deliberately has no CORS middleware, so never call the backend origin directly.
 - App-wide look and feel is set via antd `ConfigProvider` theme tokens in `main.tsx` —
@@ -103,14 +151,20 @@ classes; JSX files use `.tsx`).
 
 ## Verification
 
-- Typecheck: `npm run typecheck` (from `backend/` or `frontend/`); `npm run build` from
-  `frontend/` also verifies the bundle.
+- Typecheck: `npm run typecheck` (from `platform-backend/`, `builder-service-backend/`,
+  or `frontend/`); `npm run build` from `frontend/` also verifies the bundle.
+- Run locally: `npm run dev` in `platform-backend/` (port 3000) and in
+  `builder-service-backend/` (no port — it polls the platform), `npm run dev` in
+  `frontend/`. Builds need both backend processes up.
+- End-to-end build test repo: `https://github.com/Yiftach128/cloudplatform-build-test`
+  (a 2-file nginx repo that exists for exactly this).
 - The Docker daemon runs in WSL2 Ubuntu on `tcp://127.0.0.1:2375` (IPv4 bind is
   mandatory — WSL's localhost relay does not forward IPv6/dual-stack listeners).
-- WSL does not auto-start, but the backend self-heals: `WslDockerDaemon`
-  (`backend/src/services/wsl/wsl-docker-daemon.ts`) boots the distro when a request
-  finds the daemon dead, retries once, and holds the distro open while the server runs
-  (`DOCKER_WSL_KEEPALIVE=0` disables the hold-open). A cold request takes ~10s
-  (daemon startup is deliberately slowed ~7-20s by Docker 29's TLS deprecation
-  warning). Standalone scripts that bypass the backend must still boot WSL themselves:
-  `wsl -d Ubuntu -e true`, then poll `http://127.0.0.1:2375/_ping`.
+- WSL does not auto-start, but the platform backend self-heals: `WslDockerDaemon`
+  (`platform-backend/src/services/wsl/wsl-docker-daemon.ts`) boots the distro when a
+  request finds the daemon dead, retries once, and holds the distro open while the
+  server runs (`DOCKER_WSL_KEEPALIVE=0` disables the hold-open). A cold request takes
+  ~10s (daemon startup is deliberately slowed ~7-20s by Docker 29's TLS deprecation
+  warning). The build queue also warms the daemon on every claim. Standalone scripts
+  that bypass the backend must still boot WSL themselves: `wsl -d Ubuntu -e true`,
+  then poll `http://127.0.0.1:2375/_ping`.

@@ -16,7 +16,7 @@
         "noEmit": true,
         "jsx": "react-jsx",
 
-        /* Strictness — matches backend/tsconfig.json */
+        /* Strictness — matches platform-backend/tsconfig.json */
         "strict": true,
         "noUncheckedIndexedAccess": true,
         "noImplicitOverride": true,
