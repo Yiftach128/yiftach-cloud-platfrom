@@ -8,8 +8,8 @@ const SOURCE_CARDS: SourceCardDescriptor[] = [
     {
         kind: 'preset',
         icon: <DatabaseOutlined style={{ fontSize: 24 }} />,
-        title: 'Database',
-        description: 'Launch MongoDB, Redis, or PostgreSQL from a ready-made preset.',
+        title: 'Managed Service',
+        description: 'Order a service from an existing catalog (e.g. Redis, MongoDB).',
     },
     {
         kind: 'image',

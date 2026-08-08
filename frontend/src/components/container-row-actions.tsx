@@ -105,7 +105,7 @@ function ContainerRowActions(props: ContainerRowActionsProps): ReactElement {
                     aria-label="Restart"
                     icon={<ReloadOutlined />}
                     loading={pendingAction === 'restart'}
-                    disabled={actionPending && pendingAction !== 'restart'}
+                    disabled={!isRunningLike(props.state) || (actionPending && pendingAction !== 'restart')}
                     onClick={handleRestart}
                 />
             </Tooltip>

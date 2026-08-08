@@ -160,7 +160,7 @@ function ImageList(props: ImageListProps): ReactElement {
             loading={isLoading}
             pagination={false}
             locale={{
-                emptyText: 'No platform-built images yet. Build one from a GitHub repository via New Container > GitHub Repository.',
+                emptyText: 'No platform-built images yet. Build one from a GitHub repository via New Service > GitHub Repository.',
             }}
         />
     );

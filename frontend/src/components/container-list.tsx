@@ -1,4 +1,4 @@
-import { CloudOutlined } from '@ant-design/icons';
+import { CloudOutlined, DesktopOutlined } from '@ant-design/icons';
 import { Alert, Flex, Space, Switch, Table, Tag, Tooltip, Typography } from 'antd';
 import type { TableProps } from 'antd';
 import dayjs from 'dayjs';
@@ -28,7 +28,7 @@ function isManaged(container: Container): boolean {
     return container.labels[MANAGED_LABEL] === 'true';
 }
 
-/** "Origin" cell: containers created through the platform get the cloud badge. */
+/** "Origin" cell: containers created through the platform get the cloud badge, the rest the device badge. */
 function renderOrigin(container: Container): ReactElement {
     if (isManaged(container)) {
         return (
@@ -38,7 +38,12 @@ function renderOrigin(container: Container): ReactElement {
             </Space>
         );
     }
-    return <span>device</span>;
+    return (
+        <Space size={4}>
+            <DesktopOutlined />
+            device
+        </Space>
+    );
 }
 
 /* Width-less columns (Name, Image) share the table's remaining space under the

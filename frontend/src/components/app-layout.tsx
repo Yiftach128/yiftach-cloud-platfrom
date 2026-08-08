@@ -23,8 +23,8 @@ const navItems: NavItem[] = [
     {
         path: '/containers/new',
         icon: <PlusOutlined />,
-        label: 'New Container',
-        childLabels: { database: 'Database', image: 'Docker Image', github: 'GitHub Repository' },
+        label: 'New Service',
+        childLabels: { database: 'Managed Service', image: 'Docker Image', github: 'GitHub Repository' },
     },
     { path: '/images', icon: <CodeSandboxOutlined />, label: 'My Images' },
     { path: '/overview', icon: <DashboardOutlined />, label: 'Overview' },
@@ -64,7 +64,7 @@ function AppLayout(): ReactElement {
 
     return (
         <Layout style={{ minHeight: '100vh' }}>
-            <Layout.Sider theme="light" style={{ background: siderBackground, borderRight: '1px solid #8c8c8c' }}>
+            <Layout.Sider theme="light" style={{ background: siderBackground, borderRight: '1px solid #aaa' }}>
                 <div className="app-logo" style={{ height: headerRowHeight }}><CloudOutlined /> YCP</div>
                 <Divider style={{ margin: '0 0 8px 0', borderColor: dividerColor }} />
                 <Menu

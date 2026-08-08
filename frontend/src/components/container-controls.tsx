@@ -97,7 +97,7 @@ function ContainerControls(props: ContainerControlsProps): ReactElement {
             <Button
                 icon={<ReloadOutlined />}
                 loading={pendingAction === 'restart'}
-                disabled={actionPending && pendingAction !== 'restart'}
+                disabled={!props.running || (actionPending && pendingAction !== 'restart')}
                 onClick={handleRestart}
             >
                 Restart
