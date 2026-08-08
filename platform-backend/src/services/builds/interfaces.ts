@@ -49,6 +49,12 @@ export interface StartBuildOptions {
     repo: string;
     /** Branch or tag from the URL's "#fragment", when one was given. */
     gitRef?: string;
+    /**
+     * User-chosen image reference ("name" or "name:tag") used as the built
+     * image's tag; the queue generates one when absent. A bare name gets the
+     * daemon's implicit ":latest", so rebuilding the same name moves the tag.
+     */
+    imageName?: string;
     /** Container to create once the image is built. */
     container: BuildContainerConfig;
 }

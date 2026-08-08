@@ -18,6 +18,7 @@ import { getContainerRoute } from './routes/get-container.ts';
 import { getContainersRoute } from './routes/get-containers.ts';
 import { getHealthRoute } from './routes/get-health.ts';
 import { getImagePresetsRoute } from './routes/get-image-presets.ts';
+import { getImageRoute } from './routes/get-image.ts';
 import { getImagesRoute } from './routes/get-images.ts';
 import { postBuildRoute } from './routes/post-build.ts';
 import { postBuildsQueueClaimRoute } from './routes/post-builds-queue-claim.ts';
@@ -90,6 +91,7 @@ app.use('/api/v1', postContainerStopRoute(docker));
 app.use('/api/v1', postContainerRestartRoute(docker));
 app.use('/api/v1', getImagePresetsRoute(imagePresets));
 app.use('/api/v1', getImagesRoute(dockerImages));
+app.use('/api/v1', getImageRoute(dockerImages)); // after presets: /images/presets must not match :id
 app.use('/api/v1', deleteImageRoute(dockerImages));
 app.use('/api/v1', postBuildRoute(imageBuilds));
 app.use('/api/v1', getBuildRoute(imageBuilds));
@@ -103,9 +105,14 @@ const server = app.listen(port, host, () => {
 });
 imageBuilds.start();
 
-const shutdownSignals: NodeJS.Signals[] = ['SIGINT', 'SIGTERM'];
+// SIGBREAK is Windows's Ctrl+Break — kept as a fallback stop key, because
+// terminal/shim layers have been seen eating Ctrl+C while Ctrl+Break still
+// arrives. The log line makes a received-but-hanging shutdown distinguishable
+// from a signal that never arrived.
+const shutdownSignals: NodeJS.Signals[] = ['SIGINT', 'SIGTERM', 'SIGBREAK'];
 for (const signal of shutdownSignals) {
     process.on(signal, () => {
+        console.log(`${signal} received, shutting down...`);
         imageBuilds.stop();
         daemon.stop();
         server.close(() => process.exit(0));

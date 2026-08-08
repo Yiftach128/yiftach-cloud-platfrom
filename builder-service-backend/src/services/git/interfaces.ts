@@ -1,3 +1,11 @@
+/** One HEAD-commit lookup in an already-cloned repository. */
+export interface ReadHeadCommitOptions {
+    /** Directory holding the clone. */
+    repositoryDir: string;
+    /** Hard cap on the lookup (milliseconds); the process is killed past it. */
+    timeoutMs: number;
+}
+
 /** One shallow clone into a fresh workspace directory. */
 export interface CloneRepositoryOptions {
     /** Canonical clone URL (https://github.com/owner/repo.git). */

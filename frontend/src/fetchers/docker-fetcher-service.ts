@@ -9,6 +9,7 @@ import type {
     ContainerLogs,
     CreateContainerRequest,
     GetContainerLogsOptions,
+    ImageDetails,
     ImagePreset,
     ImageSummary,
     StartBuildRequest,
@@ -48,6 +49,21 @@ export class DockerFetcherService {
     public async getImages(): Promise<ImageSummary[]> {
         try {
             const response: AxiosResponse<ImageSummary[]> = await this.http.get('/images');
+            return response.data;
+        } catch (error) {
+            throw this.toFetcherError(error);
+        }
+    }
+
+    /**
+     * One platform-built image's details (tags, size, exposed ports, and the
+     * build-provenance labels) by id or reference; the backend answers 404 for
+     * unknown ids and 409 for unmanaged images.
+     */
+    public async getImageDetails(idOrReference: string): Promise<ImageDetails> {
+        try {
+            const encoded: string = encodeURIComponent(idOrReference);
+            const response: AxiosResponse<ImageDetails> = await this.http.get(`/images/${encoded}`);
             return response.data;
         } catch (error) {
             throw this.toFetcherError(error);

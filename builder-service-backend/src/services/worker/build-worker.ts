@@ -21,6 +21,17 @@ import { PlatformApiClient } from '../platform/platform-api-client.ts';
 import type { BuildWorkerOptions } from './interfaces.ts';
 import { LogBatcher } from './log-batcher.ts';
 
+/**
+ * Provenance labels stamped on every built image, next to the managed label.
+ * The platform's image-detail endpoint serves them and the frontend's image
+ * detail page displays them — keep the names in sync with
+ * frontend/src/components/image-details.tsx.
+ */
+const REPO_URL_LABEL = 'cloudplatform.repo-url';
+const GIT_REF_LABEL = 'cloudplatform.git-ref';
+const COMMIT_LABEL = 'cloudplatform.commit';
+const BUILD_JOB_ID_LABEL = 'cloudplatform.build-job-id';
+
 export class BuildWorker {
     private readonly platform: PlatformApiClient;
     private readonly git: GitCloneService;
@@ -81,10 +92,17 @@ export class BuildWorker {
             });
             this.throwIfJobLost(task, batcher);
 
+            const commitSha: string = await this.git.readHeadCommit({
+                repositoryDir: workspace,
+                timeoutMs: this.options.gitCloneTimeoutMs,
+            });
+            batcher.push(`Cloned commit ${commitSha}`);
+
             batcher.push(`Building image ${task.imageTag} ...`);
             await this.images.buildImage({
                 contextDir: workspace,
                 tag: task.imageTag,
+                extraLabels: buildProvenanceLabels(task, commitSha),
                 onProgressLine: (line: string) => batcher.push(line),
             });
             this.throwIfJobLost(task, batcher);
@@ -144,4 +162,24 @@ export class BuildWorker {
             console.warn(`build ${task.jobId}: could not report the failure:`, reportError);
         }
     }
+}
+
+/** The built image's provenance: where it came from and which job produced it. */
+function buildProvenanceLabels(task: BuildTask, commitSha: string): Record<string, string> {
+    // The task carries the canonical clone URL; the label gets the browsable
+    // repository URL, so the UI can link to it directly.
+    let repoUrl: string = task.gitUrl;
+    if (repoUrl.endsWith('.git')) {
+        repoUrl = repoUrl.slice(0, repoUrl.length - '.git'.length);
+    }
+
+    const labels: Record<string, string> = {
+        [REPO_URL_LABEL]: repoUrl,
+        [COMMIT_LABEL]: commitSha,
+        [BUILD_JOB_ID_LABEL]: task.jobId,
+    };
+    if (task.gitRef !== undefined) {
+        labels[GIT_REF_LABEL] = task.gitRef;
+    }
+    return labels;
 }

@@ -65,8 +65,12 @@ error handler.
 - `src/services/docker/` — the daemon-facing services. `DockerManagerService` is the
   typed facade for container operations (list/inspect/create/start/stop/logs/delete);
   `DockerImageService` owns image acquisition and lifecycle (exists-check, registry
-  pull, plus list/delete of platform-built images — those labeled
-  `cloudplatform.managed=true`; deletes never pass force, so the daemon itself
+  pull, plus list/detail/delete of platform-built images — those labeled
+  `cloudplatform.managed=true`; `GET /images/:id` serves the inspect-backed
+  `ImageDetails` with exposed ports and the provenance labels, 409 for unmanaged
+  images — its `sizeBytes` is deliberately taken from the list endpoint so it
+  matches the images table (containerd-store inspect reports compressed content
+  size instead); deletes never pass force, so the daemon itself
   refuses in-use images) with its own timeout-less dockerode client, since
   pulls run for minutes — hung streams are caught by
   `drain-progress-stream.ts`'s idle watchdog instead. The manager consumes it
@@ -79,7 +83,9 @@ error handler.
   Image *builds* do not happen in this process — they belong to the builder service.
 - `src/services/builds/` — the FIFO build queue the builder service works off:
   `POST /builds` enqueues (202, status `queued`; 429 past 10 waiting jobs) with the
-  whole container config riding along; clients poll `GET /builds/:id`. The builder
+  whole container config riding along, plus an optional `imageName` ("name" or
+  "name:tag") used as the image tag instead of the generated
+  `cloudplatform/build-<owner>-<repo>:<shortid>`; clients poll `GET /builds/:id`. The builder
   claims the oldest queued job via `POST /builds-queue/claim` (204 when empty; the
   claim also fire-and-forgets a WSL daemon warm-up), appends progress lines via
   `POST /builds-queue/:id/logs`, creates the container through the normal
@@ -116,10 +122,16 @@ report, then poll again.
   (the platform restarted and forgot the job).
 - `src/services/git/` — `GitCloneService` shallow-clones with the git CLI
   (`--depth 1 --single-branch --no-tags`, prompts disabled, `--` before the URL,
-  killed at `GIT_CLONE_TIMEOUT_MS`). The host running the builder needs `git` on PATH.
+  killed at `GIT_CLONE_TIMEOUT_MS`) and reads the clone's HEAD commit
+  (`readHeadCommit`, via `git rev-parse`). The host running the builder needs
+  `git` on PATH.
 - `src/services/docker/` — `ImageBuilderService` streams the cloned directory
   (minus `.git`) to the daemon as a tar build context (BuildKit, `version: '2'`,
-  labels the image `cloudplatform.managed=true`). The daemon never runs git.
+  labels the image `cloudplatform.managed=true` plus the caller's `extraLabels` —
+  the worker passes the build provenance: `cloudplatform.repo-url`, `.git-ref`
+  (only when a `#ref` was given), `.commit`, and `.build-job-id`; the frontend's
+  image-detail page reads these, so keep the names in sync with
+  `frontend/src/components/image-details.tsx`). The daemon never runs git.
   `drain-progress-stream.ts` and `decode-buildkit-log-line.ts` here are deliberate
   copies of the platform's docker-folder logic (`drain-progress-stream.ts` exists in
   both packages **byte-identically** — no workspaces, so edits must touch both).
@@ -144,10 +156,24 @@ classes; JSX files use `.tsx`).
   config in one `POST /builds`; the builder service creates the container server-side,
   so the wizard only watches the job (`queued` → `running` → terminal) and navigates to
   the container when it succeeds. It never calls `POST /containers` for that source.
+- Clicking a My Images row opens `/images/:imageId` (short id in the URL — the daemon
+  resolves it as an id prefix): `components/image-details.tsx`, fed by
+  `GET /api/v1/images/:id`, showing the basics, the EXPOSEd ports, and the builder's
+  provenance labels (repository link, branch/tag, commit, build job). The wizard's
+  create-from-image deep link (`?image=`) uses the same endpoint to pre-fill the
+  ports rows from the image's TCP EXPOSEs (host port = container port, like presets;
+  best-effort — a failed lookup just leaves the default empty row).
 - The dev server proxies `/api` → `http://127.0.0.1:3000` (`vite.config.ts`); the backend
   deliberately has no CORS middleware, so never call the backend origin directly.
 - App-wide look and feel is set via antd `ConfigProvider` theme tokens in `main.tsx` —
   prefer tokens over CSS overrides of `.ant-*` classes.
+- UI chrome is never text-selectable. `index.css` sets `user-select: none` on `body`;
+  only copyable content opts back in with `user-select: text` — form fields, table
+  *body* cells (headers/column names stay chrome), description values, alert text,
+  and `.app-log-output` (the log panes). Buttons re-disable selection so row actions
+  inside table cells stay chrome. New chrome (buttons, menus, cards, breadcrumbs,
+  table headers) needs no work — it inherits none; a new surface that displays
+  copyable values must join the opt-in list in `index.css`.
 
 ## Verification
 
@@ -163,7 +189,15 @@ classes; JSX files use `.tsx`).
 - WSL does not auto-start, but the platform backend self-heals: `WslDockerDaemon`
   (`platform-backend/src/services/wsl/wsl-docker-daemon.ts`) boots the distro when a
   request finds the daemon dead, retries once, and holds the distro open while the
-  server runs (`DOCKER_WSL_KEEPALIVE=0` disables the hold-open). A cold request takes
+  server runs (`DOCKER_WSL_KEEPALIVE=0` disables the hold-open). Its `wsl.exe`
+  children are spawned with `windowsHide: true` on purpose: a `wsl.exe` sharing the
+  backend terminal's console can flip that console's input modes and interfere with
+  Ctrl+C for the whole terminal. Don't switch it to `detached` — a console-less
+  `wsl.exe` allocates its own *visible* console window. Keep any new `wsl.exe`
+  spawn `windowsHide` (or short-lived) for the same reason. Ctrl+Break (SIGBREAK)
+  is a registered fallback stop key, and the server logs
+  `<signal> received, shutting down...` so a dead keyboard is distinguishable from
+  a hung shutdown. A cold request takes
   ~10s (daemon startup is deliberately slowed ~7-20s by Docker 29's TLS deprecation
   warning). The build queue also warms the daemon on every claim. Standalone scripts
   that bypass the backend must still boot WSL themselves: `wsl -d Ubuntu -e true`,

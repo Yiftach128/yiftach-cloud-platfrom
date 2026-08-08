@@ -62,8 +62,15 @@ export class BuildQueueService {
         const cloneUrl = `https://github.com/${options.owner}/${options.repo}.git`;
 
         const jobId: string = randomUUID();
-        const shortId: string = jobId.replaceAll('-', '').slice(0, 8);
-        const tag = `cloudplatform/build-${toTagSegment(options.owner)}-${toTagSegment(options.repo)}:${shortId}`;
+        let tag: string;
+        if (options.imageName !== undefined) {
+            // The user picked the reference (a bare name gets the daemon's
+            // implicit ":latest", so rebuilding the same name moves the tag).
+            tag = options.imageName;
+        } else {
+            const shortId: string = jobId.replaceAll('-', '').slice(0, 8);
+            tag = `cloudplatform/build-${toTagSegment(options.owner)}-${toTagSegment(options.repo)}:${shortId}`;
+        }
 
         return this.registry.create(jobId, tag, cloneUrl, options);
     }

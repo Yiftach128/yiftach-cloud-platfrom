@@ -1,5 +1,5 @@
-import { App as AntdApp, Flex } from 'antd';
-import { useState } from 'react';
+import { App as AntdApp, Flex, Skeleton } from 'antd';
+import { useEffect, useState } from 'react';
 import type { ReactElement } from 'react';
 import { Navigate, useNavigate, useParams, useSearchParams } from 'react-router';
 
@@ -7,6 +7,8 @@ import type {
     BuildJob,
     ContainerDetails,
     CreateContainerRequest,
+    ImageDetails,
+    ImageExposedPort,
     ImagePreset,
     PortMappingRequest,
     PresetEnvVar,
@@ -99,12 +101,20 @@ function toCreateRequest(values: ContainerConfigFormValues, image: string): Crea
 }
 
 function toStartBuildRequest(values: ContainerConfigFormValues, gitUrl: string): StartBuildRequest {
-    return {
+    const request: StartBuildRequest = {
         gitUrl: gitUrl,
         name: values.name,
         ports: toPortRequests(values.ports),
         env: toEnvRecord(values),
     };
+    // Blank means "auto-generate" and is simply omitted from the request.
+    if (values.imageName !== undefined) {
+        const imageName: string = values.imageName.trim();
+        if (imageName !== '') {
+            request.imageName = imageName;
+        }
+    }
+    return request;
 }
 
 /**
@@ -131,6 +141,9 @@ function NewContainerWizard(props: NewContainerWizardProps): ReactElement {
     const [buildJobId, setBuildJobId] = useState<string | null>(null);
     /** The form values a GitHub build was started with; restored when returning to the form. */
     const [savedValues, setSavedValues] = useState<ContainerConfigFormValues | null>(null);
+    /** Ports rows derived from the deep-linked image's EXPOSEd ports; null until (and unless) fetched. */
+    const [prefillPorts, setPrefillPorts] = useState<PortRowValue[] | null>(null);
+    const [prefillPortsPending, setPrefillPortsPending] = useState<boolean>(false);
 
     /* null = the card screen (no :source segment). An unrecognized segment
        redirects back to the cards instead of rendering a broken step. */
@@ -160,6 +173,41 @@ function NewContainerWizard(props: NewContainerWizardProps): ReactElement {
     } else {
         prefillImage = null;
     }
+
+    /* The deep-linked image's EXPOSEd ports pre-fill the ports rows (host port
+       mirroring the container port, like presets). Best-effort: a failure —
+       image gone, daemon still booting — just leaves the default empty row. */
+    useEffect(() => {
+        if (prefillImage === null) {
+            return;
+        }
+        let disposed: boolean = false;
+        setPrefillPorts(null);
+        setPrefillPortsPending(true);
+
+        props.fetcher.getImageDetails(prefillImage)
+            .then((details: ImageDetails) => {
+                if (!disposed) {
+                    /* The create request publishes TCP only, so only TCP EXPOSEs prefill. */
+                    const rows: PortRowValue[] = details.exposedPorts
+                        .filter((port: ImageExposedPort) => port.protocol === 'tcp')
+                        .map((port: ImageExposedPort) => ({ hostPort: port.port, containerPort: port.port }));
+                    if (rows.length > 0) {
+                        setPrefillPorts(rows);
+                    }
+                    setPrefillPortsPending(false);
+                }
+            })
+            .catch(() => {
+                if (!disposed) {
+                    setPrefillPortsPending(false);
+                }
+            });
+
+        return () => {
+            disposed = true;
+        };
+    }, [props.fetcher, prefillImage]);
 
     async function createAndOpen(values: ContainerConfigFormValues, image: string): Promise<void> {
         const details: ContainerDetails = await props.fetcher.createContainer(
@@ -276,6 +324,10 @@ function NewContainerWizard(props: NewContainerWizardProps): ReactElement {
     let form: ReactElement | null;
     if (sourceKind === 'preset' && selectedPreset === null) {
         form = null; // nothing to configure until a preset is picked
+    } else if (prefillImage !== null && prefillPortsPending) {
+        /* The form only mounts once the exposed-ports lookup settles, so its
+           initialValues already carry the pre-filled rows. */
+        form = <Skeleton active paragraph={{ rows: 6 }} />;
     } else {
         let formKey: string;
         let initialPreset: ImagePreset | null;
@@ -300,6 +352,9 @@ function NewContainerWizard(props: NewContainerWizardProps): ReactElement {
             initialValues = buildInitialValues(initialPreset);
             if (prefillImage !== null) {
                 initialValues.image = prefillImage;
+                if (prefillPorts !== null) {
+                    initialValues.ports = prefillPorts;
+                }
             }
         }
 

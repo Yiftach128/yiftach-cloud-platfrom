@@ -19,6 +19,15 @@ import { ValidationError } from './validation-error.ts';
 const REPO_SEGMENT_PATTERN = /^[A-Za-z0-9_.-]+$/;
 const GIT_REF_PATTERN = /^[A-Za-z0-9_./-]+$/;
 const GIT_SUFFIX = '.git';
+/**
+ * Docker image reference, simplified: lowercase name parts (optionally
+ * slash-separated), plus an optional ":tag". Stricter than the create-path's
+ * image check on purpose — this name is *minted* here, not resolved by the
+ * daemon against a registry.
+ */
+const IMAGE_NAME_PATTERN =
+    /^[a-z0-9]+(?:[._-][a-z0-9]+)*(?:\/[a-z0-9]+(?:[._-][a-z0-9]+)*)*(?::[A-Za-z0-9_][A-Za-z0-9._-]{0,127})?$/;
+const MAX_IMAGE_NAME_LENGTH = 200;
 
 export function parseStartBuildRequest(body: unknown): StartBuildOptions {
     if (typeof body !== 'object' || body === null || Array.isArray(body)) {
@@ -81,6 +90,7 @@ export function parseStartBuildRequest(body: unknown): StartBuildOptions {
     const name: string = parseContainerName(record['name']);
     const ports: PortMapping[] = parsePortMappings(record['ports']);
     const env: Record<string, string> = parseEnvVars(record['env']);
+    const imageName: string | undefined = parseImageName(record['imageName']);
 
     const options: StartBuildOptions = {
         gitUrl: raw.trim(),
@@ -91,5 +101,32 @@ export function parseStartBuildRequest(body: unknown): StartBuildOptions {
     if (gitRef !== undefined) {
         options.gitRef = gitRef;
     }
+    if (imageName !== undefined) {
+        options.imageName = imageName;
+    }
     return options;
+}
+
+/** Optional field; an empty or whitespace-only value counts as absent. */
+function parseImageName(value: unknown): string | undefined {
+    if (value === undefined) {
+        return undefined;
+    }
+    if (typeof value !== 'string') {
+        throw new ValidationError('"imageName" must be a string when present');
+    }
+    const imageName: string = value.trim();
+    if (imageName === '') {
+        return undefined;
+    }
+    if (imageName.length > MAX_IMAGE_NAME_LENGTH) {
+        throw new ValidationError(`"imageName" must be at most ${MAX_IMAGE_NAME_LENGTH} characters`);
+    }
+    if (!IMAGE_NAME_PATTERN.test(imageName)) {
+        throw new ValidationError(
+            '"imageName" must look like "name" or "name:tag" — lowercase name of letters, digits,'
+                + ' ".", "_", "-" (optionally slash-separated), e.g. my-app or team/my-app:v2',
+        );
+    }
+    return imageName;
 }

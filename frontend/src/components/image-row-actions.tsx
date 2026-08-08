@@ -1,22 +1,24 @@
 import { DeleteOutlined, PlayCircleOutlined } from '@ant-design/icons';
 import { App as AntdApp, Button, Flex, Popconfirm, Tooltip } from 'antd';
 import { useState } from 'react';
-import type { ReactElement } from 'react';
+import type { MouseEvent, ReactElement } from 'react';
 import { useNavigate } from 'react-router';
 
 import { toErrorText } from './container-format.ts';
 import type { ImageRowActionsProps } from './interfaces.ts';
 
 /**
- * Action pair for one image-list row: create a container from the image, or
- * delete it. Unlike the container rows, image rows are not click targets
- * (there is no image details page), so the buttons stay always visible — no
- * hover-reveal CSS and no click-shielding wrapper.
+ * Hover-revealed action pair for one image-list row: create a container from
+ * the image, or delete it. Visibility is CSS-driven (.app-row-actions in
+ * index.css); the -pinned modifier keeps the pair shown while the delete runs
+ * or its confirm is open, because the pointer then sits in the portaled popup
+ * and the row loses :hover.
  */
 function ImageRowActions(props: ImageRowActionsProps): ReactElement {
     const app = AntdApp.useApp();
     const navigate = useNavigate();
     const [deleting, setDeleting] = useState<boolean>(false);
+    const [confirmOpen, setConfirmOpen] = useState<boolean>(false);
 
     /* Deep-links into the new-container wizard's image step; the wizard reads
        the ?image= param and prefills the Image reference field. */
@@ -44,6 +46,18 @@ function ImageRowActions(props: ImageRowActionsProps): ReactElement {
         }
     }
 
+    /* The whole row is a navigation click target (onRow in image-list).
+       Stopping here shields the buttons AND the Popconfirm popup: the popup
+       mounts in document.body, but React re-bubbles its clicks along the
+       React tree, which passes through this wrapper. */
+    function handleWrapperClick(event: MouseEvent<HTMLDivElement>): void {
+        event.stopPropagation();
+    }
+
+    function handleConfirmOpenChange(open: boolean): void {
+        setConfirmOpen(open);
+    }
+
     let createTooltip: string;
     if (props.primaryTag === null) {
         createTooltip = 'No tag to create from';
@@ -51,8 +65,15 @@ function ImageRowActions(props: ImageRowActionsProps): ReactElement {
         createTooltip = 'Create container';
     }
 
+    let wrapperClassName: string;
+    if (deleting || confirmOpen) {
+        wrapperClassName = 'app-row-actions app-row-actions-pinned';
+    } else {
+        wrapperClassName = 'app-row-actions';
+    }
+
     return (
-        <Flex gap={4} justify="flex-end">
+        <Flex gap={4} justify="flex-end" className={wrapperClassName} onClick={handleWrapperClick}>
             <Tooltip title={createTooltip}>
                 <Button
                     type="text"
@@ -69,6 +90,7 @@ function ImageRowActions(props: ImageRowActionsProps): ReactElement {
                 okText="Delete"
                 okButtonProps={{ danger: true }}
                 onConfirm={handleDelete}
+                onOpenChange={handleConfirmOpenChange}
             >
                 <Tooltip title="Delete">
                     <Button

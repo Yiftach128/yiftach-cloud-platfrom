@@ -39,12 +39,19 @@ export class ImageBuilderService {
         // plain node stream docker-modem expects to pipe from.
         const contextStream: Readable = Readable.from(contextTar);
 
+        const labels: Record<string, string> = {};
+        for (const [name, value] of Object.entries(options.extraLabels)) {
+            labels[name] = value;
+        }
+        // Set last, so no extra label can ever override the managed marker.
+        labels[MANAGED_LABEL] = 'true';
+
         const buildOptions: Docker.ImageBuildOptions = {
             t: options.tag,
             version: '2',
             rm: true,
             forcerm: true,
-            labels: { [MANAGED_LABEL]: 'true' },
+            labels: labels,
         };
 
         const stream = await this.docker.buildImage(contextStream, buildOptions);

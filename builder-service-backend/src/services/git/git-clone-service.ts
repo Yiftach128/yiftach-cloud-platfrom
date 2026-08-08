@@ -10,7 +10,8 @@
 import { spawn } from 'node:child_process';
 
 import { GitCloneError } from './git-clone-error.ts';
-import type { CloneRepositoryOptions } from './interfaces.ts';
+import { GitRevParseError } from './git-rev-parse-error.ts';
+import type { CloneRepositoryOptions, ReadHeadCommitOptions } from './interfaces.ts';
 
 /** Only the tail of stderr is kept — git progress can be long, the error is at the end. */
 const STDERR_TAIL_CHARS = 2000;
@@ -54,6 +55,50 @@ export class GitCloneService {
                         detail = `git exited with code ${code}`;
                     }
                     reject(new GitCloneError(options.gitUrl, detail));
+                }
+            });
+        });
+    }
+
+    /** HEAD commit hash of an already-cloned repository, via `git rev-parse`. */
+    public readHeadCommit(options: ReadHeadCommitOptions): Promise<string> {
+        const args: string[] = ['-C', options.repositoryDir, 'rev-parse', 'HEAD'];
+
+        return new Promise<string>((resolve, reject) => {
+            const child = spawn('git', args, {
+                stdio: ['ignore', 'pipe', 'pipe'],
+                env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
+                signal: AbortSignal.timeout(options.timeoutMs),
+            });
+
+            let stdout = '';
+            child.stdout.on('data', (chunk: Buffer) => {
+                stdout = stdout + chunk.toString('utf8');
+            });
+
+            let stderrTail = '';
+            child.stderr.on('data', (chunk: Buffer) => {
+                stderrTail = (stderrTail + chunk.toString('utf8')).slice(-STDERR_TAIL_CHARS);
+            });
+
+            child.on('error', (error: Error) => {
+                if (error.name === 'AbortError') {
+                    const seconds: number = options.timeoutMs / 1000;
+                    reject(new GitRevParseError(`timed out after ${seconds}s`));
+                } else {
+                    reject(new GitRevParseError(error.message));
+                }
+            });
+
+            child.on('close', (code: number | null) => {
+                if (code === 0) {
+                    resolve(stdout.trim());
+                } else {
+                    let detail: string = stderrTail.trim();
+                    if (detail === '') {
+                        detail = `git exited with code ${code}`;
+                    }
+                    reject(new GitRevParseError(detail));
                 }
             });
         });

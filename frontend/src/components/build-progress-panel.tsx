@@ -195,6 +195,7 @@ function BuildProgressPanel(props: BuildProgressPanelProps): ReactElement {
             <>
                 {failureAlert}
                 <div
+                    className="app-log-output"
                     onScroll={handleScroll}
                     style={{
                         height: 360,

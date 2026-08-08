@@ -199,6 +199,7 @@ function ContainerLogsPanel(props: ContainerLogsPanelProps): ReactElement {
 
         const lineList: ReactElement = (
             <div
+                className="app-log-output"
                 onScroll={handleScroll}
                 style={{
                     flex: 1,

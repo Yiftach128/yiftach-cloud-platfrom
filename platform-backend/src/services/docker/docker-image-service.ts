@@ -15,12 +15,13 @@ import Docker from 'dockerode';
 import { DaemonRequestRunner } from './daemon-request-runner.ts';
 import { DockerApiError } from './docker-api-error.ts';
 import { drainProgressStream } from './drain-progress-stream.ts';
-import { readImageLabels, toImageSummary } from './image-mapper.ts';
+import { readImageLabels, readRepoTags, toImageDetails, toImageSummary } from './image-mapper.ts';
 import { ImageNotManagedError } from './image-not-managed-error.ts';
 import { ImagePullError } from './image-pull-error.ts';
 import type {
     DockerImageProvider,
     DockerImageServiceOptions,
+    ImageDetails,
     ImageSummary,
 } from './interfaces.ts';
 import { resolveDockerEndpoint } from './resolve-docker-endpoint.ts';
@@ -88,6 +89,37 @@ export class DockerImageService implements DockerImageProvider {
     }
 
     /**
+     * Inspects a platform-built image by id (or reference): tags, size,
+     * exposed ports, and the labels carrying the builder's provenance stamps.
+     * Throws {@link ImageNotManagedError} (→ 409) for images without the
+     * managed label; unknown ids surface as the daemon's 404
+     * {@link DockerApiError}.
+     */
+    async getManagedImageDetails(id: string): Promise<ImageDetails> {
+        const raw = await this.requests.run(`GET /images/${id}/json`, () =>
+            this.docker.getImage(id).inspect(),
+        );
+
+        const details: ImageDetails = toImageDetails(raw);
+        if (details.labels[MANAGED_LABEL] !== 'true') {
+            throw new ImageNotManagedError(id);
+        }
+
+        // Under the containerd image store, inspect's Size is the compressed
+        // content size while the list reports the on-disk footprint — the
+        // number the images table shows. Serve the list's size so the two
+        // views agree; inspect's value stays only if the list misses the image.
+        const summaries: ImageSummary[] = await this.getManagedImages();
+        for (const summary of summaries) {
+            if (summary.id === details.id) {
+                details.sizeBytes = summary.sizeBytes;
+                break;
+            }
+        }
+        return details;
+    }
+
+    /**
      * Deletes a platform-built image by id (or reference). Throws
      * {@link ImageNotManagedError} (→ 409) for images without the managed
      * label, so hand-pulled images cannot be deleted through this API. "Unused"
@@ -105,9 +137,25 @@ export class DockerImageService implements DockerImageProvider {
             throw new ImageNotManagedError(id);
         }
 
-        await this.requests.run(`DELETE /images/${id}`, () =>
-            this.docker.getImage(id).remove(),
-        );
+        // The daemon refuses to delete a multi-tagged image by id without
+        // force ("referenced in multiple repositories" 409). Deleting each
+        // tag reference instead untags one alias at a time; the last removal
+        // deletes the image content, and an image a container uses is still
+        // refused there — the no-force safety keeps holding. Single-tag and
+        // dangling images keep the id path (a dangling image has no
+        // reference to delete by).
+        const repoTags: string[] = readRepoTags(details);
+        if (repoTags.length > 1) {
+            for (const tag of repoTags) {
+                await this.requests.run(`DELETE /images/${tag}`, () =>
+                    this.docker.getImage(tag).remove(),
+                );
+            }
+        } else {
+            await this.requests.run(`DELETE /images/${id}`, () =>
+                this.docker.getImage(id).remove(),
+            );
+        }
     }
 
     private async imageExists(reference: string): Promise<boolean> {

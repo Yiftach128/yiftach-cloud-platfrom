@@ -61,6 +61,20 @@ export interface ImageListProps {
     fetcher: DockerFetcherService;
 }
 
+export interface ImageDetailsProps {
+    fetcher: DockerFetcherService;
+    /** Route-param image id (short or full); the fetcher handles URL encoding. */
+    imageId: string;
+}
+
+export interface ImageControlsProps {
+    fetcher: DockerFetcherService;
+    /** sha256 image id; the fetcher handles URL encoding. */
+    imageId: string;
+    /** First repository tag, or null for a dangling image (disables create-container). */
+    primaryTag: string | null;
+}
+
 export interface ImageRowActionsProps {
     fetcher: DockerFetcherService;
     /** sha256 image id; the fetcher handles URL encoding. */
@@ -117,6 +131,8 @@ export interface ContainerConfigFormValues {
     image?: string;
     /** GitHub repository URL, when the source kind is 'github'. */
     gitUrl?: string;
+    /** Optional image reference used as the built image's tag, when the source kind is 'github'. */
+    imageName?: string;
     ports: PortRowValue[];
     /** Values for the preset's declared env vars, keyed by variable name. */
     presetEnv?: Record<string, string>;

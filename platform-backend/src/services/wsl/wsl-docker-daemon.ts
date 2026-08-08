@@ -128,7 +128,13 @@ export class WslDockerDaemon implements DockerDaemonLifecycle {
     /** Boots the distro; a fast no-op when it is already running. */
     private bootDistro(): Promise<void> {
         return new Promise((resolve) => {
-            const boot = spawn('wsl.exe', ['-d', this.distro, '-e', 'true'], { stdio: 'ignore' });
+            // windowsHide: keeps this child off the backend's console (see
+            // startKeepalive) — detached would do that too, but a console-less
+            // wsl.exe allocates its own visible console window.
+            const boot = spawn('wsl.exe', ['-d', this.distro, '-e', 'true'], {
+                stdio: 'ignore',
+                windowsHide: true,
+            });
             boot.on('error', () => resolve()); // wsl.exe missing — the poll loop will time out
             boot.on('exit', () => resolve());
         });
@@ -142,8 +148,14 @@ export class WslDockerDaemon implements DockerDaemonLifecycle {
             return;
         }
 
+        // windowsHide gives this long-lived child its own hidden console
+        // instead of the backend terminal's: a wsl.exe sharing that console
+        // can flip its input modes and interfere with Ctrl+C handling.
+        // (detached would isolate it too, but a console-less wsl.exe allocates
+        // its own VISIBLE console window.) stop() still kills it by PID.
         const child = spawn('wsl.exe', ['-d', this.distro, '--exec', 'sleep', 'infinity'], {
             stdio: 'ignore',
+            windowsHide: true,
         });
         child.unref(); // never holds Node's event loop open
         child.on('error', () => {

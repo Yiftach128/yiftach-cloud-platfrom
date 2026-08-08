@@ -1,9 +1,10 @@
-import { Alert, Table, Tooltip, Typography } from 'antd';
+import { Alert, Flex, Table, Tag, Tooltip, Typography } from 'antd';
 import type { TableProps } from 'antd';
 import dayjs from 'dayjs';
 import relativeTime from 'dayjs/plugin/relativeTime';
 import { useEffect, useState } from 'react';
 import type { ReactElement } from 'react';
+import { useNavigate } from 'react-router';
 
 dayjs.extend(relativeTime);
 
@@ -19,22 +20,33 @@ function formatCreatedAt(createdAt: string): string {
     return dayjs(createdAt).fromNow();
 }
 
-/** "Tags" cell: every tag of the image, or a muted marker for dangling images. */
+/**
+ * "Tags" cell: one chip per tag (an image ID can carry several tags — every
+ * identical rebuild just adds an alias), or a muted marker for dangling images.
+ * antd 6 tags carry no margin of their own, so the flex gap is what keeps
+ * adjacent chips apart — empty space the table background shows through.
+ */
 function renderTags(tags: string[]): ReactElement {
     if (tags.length === 0) {
         return <Typography.Text type="secondary">untagged</Typography.Text>;
     }
-    return <span>{tags.join(', ')}</span>;
+    return (
+        <Flex wrap gap={12}>
+            {tags.map((tag: string) => (
+                <Tag key={tag}>{tag}</Tag>
+            ))}
+        </Flex>
+    );
 }
 
 /* The width-less Tags column takes the table's remaining space under the fixed
-   layout; the bounded columns hold their pixel widths. */
+   layout; the bounded columns hold their pixel widths. No ellipsis on Tags —
+   chips wrap onto extra lines instead of being clipped. */
 const staticColumns: NonNullable<TableProps<ImageSummary>['columns']> = [
     {
         title: 'Tags',
         dataIndex: 'tags',
         key: 'tags',
-        ellipsis: true,
         render: (tags: string[]) => renderTags(tags),
     },
     {
@@ -100,6 +112,7 @@ function buildColumns(fetcher: DockerFetcherService, onMutated: () => void): Non
  * the backend lists only images labeled cloudplatform.managed=true.
  */
 function ImageList(props: ImageListProps): ReactElement {
+    const navigate = useNavigate();
     const [images, setImages] = useState<ImageSummary[]>([]);
     const [errorMessage, setErrorMessage] = useState<string | null>(null);
     const [isLoading, setIsLoading] = useState<boolean>(true);
@@ -153,6 +166,7 @@ function ImageList(props: ImageListProps): ReactElement {
 
     return (
         <Table<ImageSummary>
+            className="app-hover-actions-table"
             tableLayout="fixed"
             columns={columns}
             dataSource={images}
@@ -162,6 +176,14 @@ function ImageList(props: ImageListProps): ReactElement {
             locale={{
                 emptyText: 'No platform-built images yet. Build one from a GitHub repository via New Service > GitHub Repository.',
             }}
+            onRow={(record: ImageSummary) => ({
+                onClick: (): void => {
+                    /* The short id keeps the URL and breadcrumb readable; the
+                       daemon resolves it like any id prefix. */
+                    navigate(`/images/${encodeURIComponent(shortImageId(record.id))}`);
+                },
+                style: { cursor: 'pointer' },
+            })}
         />
     );
 }

@@ -364,6 +364,40 @@ export interface ImageSummary {
     containers: number;
 }
 
+/** One container port an image's Dockerfile EXPOSEs. */
+export interface ImageExposedPort {
+    port: number;
+    /** "tcp", "udp" or "sctp". */
+    protocol: string;
+}
+
+/**
+ * Detailed view of one platform-built image, from the daemon's inspect
+ * endpoint (GET /images/:id). The build-provenance labels the builder stamps
+ * (cloudplatform.repo-url, .git-ref, .commit, .build-job-id) arrive in
+ * `labels`, untouched.
+ */
+export interface ImageDetails {
+    id: string;
+    /** Repository tags; empty for dangling images. */
+    tags: string[];
+    createdAt: Date;
+    /**
+     * On-disk size in bytes, taken from the daemon's *list* endpoint so it
+     * always matches the images table (under the containerd image store,
+     * inspect's own Size is the compressed content size instead); -1 when
+     * unavailable.
+     */
+    sizeBytes: number;
+    labels: Record<string, string>;
+    /** Ports the image EXPOSEs, ascending; empty when the Dockerfile declares none. */
+    exposedPorts: ImageExposedPort[];
+    /** e.g. "amd64"; empty when the daemon omits it. */
+    architecture: string;
+    /** e.g. "linux"; empty when the daemon omits it. */
+    os: string;
+}
+
 export interface DeleteContainerOptions {
     /** Kill the container if it is running. Without this, deleting a running container fails. */
     force?: boolean;

@@ -13,6 +13,9 @@ const ENV_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const IMAGE_REF_PATTERN = /^\S+$/;
 /** Mirror of the backend's GitHub URL rule (services/validation/parse-start-build-request.ts). */
 const GITHUB_URL_PATTERN = /^https:\/\/(www\.)?github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+/;
+/** Mirror of the backend's image name rule (services/validation/parse-start-build-request.ts). */
+const IMAGE_NAME_PATTERN =
+    /^[a-z0-9]+(?:[._-][a-z0-9]+)*(?:\/[a-z0-9]+(?:[._-][a-z0-9]+)*)*(?::[A-Za-z0-9_][A-Za-z0-9._-]{0,127})?$/;
 const MIN_PORT = 1;
 const MAX_PORT = 65535;
 
@@ -39,17 +42,33 @@ function ContainerConfigForm(props: ContainerConfigFormProps): ReactElement {
         );
     } else if (props.sourceKind === 'github') {
         sourceField = (
-            <Form.Item
-                label="GitHub repository"
-                name="gitUrl"
-                extra="A public repository with a Dockerfile at its root."
-                rules={[
-                    { required: true, message: 'Enter a repository URL' },
-                    { pattern: GITHUB_URL_PATTERN, message: 'Use https://github.com/owner/repository' },
-                ]}
-            >
-                <Input placeholder="https://github.com/owner/repository" />
-            </Form.Item>
+            <>
+                <Form.Item
+                    label="GitHub repository"
+                    name="gitUrl"
+                    extra="A public repository with a Dockerfile at its root."
+                    rules={[
+                        { required: true, message: 'Enter a repository URL' },
+                        { pattern: GITHUB_URL_PATTERN, message: 'Use https://github.com/owner/repository' },
+                    ]}
+                >
+                    <Input placeholder="https://github.com/owner/repository" />
+                </Form.Item>
+                <Form.Item
+                    label="Image name"
+                    name="imageName"
+                    extra={'Optional — becomes the built image\'s tag (a bare name means ":latest", '
+                        + 'and rebuilding the same name moves the tag). Empty = auto-generated.'}
+                    rules={[
+                        {
+                            pattern: IMAGE_NAME_PATTERN,
+                            message: 'Lowercase name, optional :tag — e.g. my-app or team/my-app:v2',
+                        },
+                    ]}
+                >
+                    <Input placeholder="my-app or my-app:v2 (leave empty to auto-generate)" />
+                </Form.Item>
+            </>
         );
     } else {
         sourceField = null;

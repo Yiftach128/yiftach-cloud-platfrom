@@ -304,6 +304,35 @@ export interface ImageSummary {
     containers: number;
 }
 
+/** One container port an image's Dockerfile EXPOSEs. */
+export interface ImageExposedPort {
+    port: number;
+    /** "tcp", "udp" or "sctp". */
+    protocol: string;
+}
+
+/**
+ * Detailed view of one platform-built image, from GET /images/:id. The
+ * build-provenance labels the builder stamps (cloudplatform.repo-url,
+ * .git-ref, .commit, .build-job-id) arrive in `labels`.
+ */
+export interface ImageDetails {
+    id: string;
+    /** Repository tags; empty for dangling images. */
+    tags: string[];
+    /** ISO 8601 timestamp (a Date on the backend, serialized by JSON). */
+    createdAt: string;
+    /** On-disk size in bytes, same footprint number the images table shows; -1 when unavailable. */
+    sizeBytes: number;
+    labels: Record<string, string>;
+    /** Ports the image EXPOSEs, ascending; empty when the Dockerfile declares none. */
+    exposedPorts: ImageExposedPort[];
+    /** e.g. "amd64"; empty when the daemon omits it. */
+    architecture: string;
+    /** e.g. "linux"; empty when the daemon omits it. */
+    os: string;
+}
+
 /** One host→container port publication in a create request. TCP only for now. */
 export interface PortMappingRequest {
     hostPort: number;
@@ -330,6 +359,11 @@ export interface StartBuildRequest {
     name: string;
     ports: PortMappingRequest[];
     env: Record<string, string>;
+    /**
+     * Optional image reference ("name" or "name:tag") used as the built
+     * image's tag; the backend generates one when absent.
+     */
+    imageName?: string;
 }
 
 /**

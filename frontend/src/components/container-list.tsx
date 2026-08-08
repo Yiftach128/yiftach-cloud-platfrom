@@ -1,11 +1,12 @@
 import { CloudOutlined, DesktopOutlined } from '@ant-design/icons';
 import { Alert, Flex, Space, Switch, Table, Tag, Tooltip, Typography } from 'antd';
-import type { TableProps } from 'antd';
+import type { TableColumnType, TableProps } from 'antd';
 import dayjs from 'dayjs';
 import relativeTime from 'dayjs/plugin/relativeTime';
 import { useEffect, useState } from 'react';
-import type { ReactElement } from 'react';
+import type { MouseEvent, ReactElement } from 'react';
 import { useNavigate } from 'react-router';
+import type { NavigateFunction } from 'react-router';
 
 dayjs.extend(relativeTime);
 
@@ -14,10 +15,18 @@ import type { DockerFetcherService } from '../fetchers/docker-fetcher-service.ts
 import type { Container, ContainerState, PortBinding } from '../fetchers/interfaces.ts';
 import { formatPorts, formatTimestamp, stateTagColor } from './container-format.ts';
 import ContainerRowActions from './container-row-actions.tsx';
+import { shortImageId } from './image-format.ts';
 import type { ContainerListProps } from './interfaces.ts';
 
 /** Label stamped on every container the platform creates; the default view filters on it. */
 const MANAGED_LABEL = 'cloudplatform.managed';
+
+/**
+ * Label the builder stamps on every image it builds. Containers inherit their
+ * image's labels, so its presence marks the container's image as
+ * platform-built — preset and registry images never carry it.
+ */
+const BUILD_JOB_ID_LABEL = 'cloudplatform.build-job-id';
 
 function formatCreatedAt(createdAt: string): string {
     return dayjs(createdAt).fromNow();
@@ -46,11 +55,33 @@ function renderOrigin(container: Container): ReactElement {
     );
 }
 
-/* Width-less columns (Name, Image) share the table's remaining space under the
-   fixed layout; the bounded columns hold their pixel widths. */
+/**
+ * "Image" cell: for containers whose image was platform-built (see
+ * BUILD_JOB_ID_LABEL), a link opening the image details page; plain text
+ * otherwise. Stopping the click keeps the whole-row navigation to container
+ * details from also firing.
+ */
+function renderImage(container: Container, navigate: NavigateFunction): ReactElement {
+    if (container.labels[BUILD_JOB_ID_LABEL] === undefined) {
+        return <>{container.image}</>;
+    }
+
+    function handleClick(event: MouseEvent<HTMLElement>): void {
+        event.stopPropagation();
+        /* The short id keeps the URL and breadcrumb readable; the daemon
+           resolves it like any id prefix. */
+        navigate(`/images/${encodeURIComponent(shortImageId(container.imageId))}`);
+    }
+
+    return <Typography.Link onClick={handleClick}>{container.image}</Typography.Link>;
+}
+
+/* Width-less columns (Name, and Image in buildColumns) share the table's
+   remaining space under the fixed layout; the bounded columns hold their pixel
+   widths. Image lives in buildColumns because its cell navigates. */
+const nameColumn: TableColumnType<Container> = { title: 'Name', dataIndex: 'name', key: 'name', ellipsis: true };
+
 const staticColumns: NonNullable<TableProps<Container>['columns']> = [
-    { title: 'Name', dataIndex: 'name', key: 'name', ellipsis: true },
-    { title: 'Image', dataIndex: 'image', key: 'image', ellipsis: true },
     {
         title: 'Origin',
         key: 'origin',
@@ -83,23 +114,32 @@ const staticColumns: NonNullable<TableProps<Container>['columns']> = [
     },
 ];
 
-function buildColumns(fetcher: DockerFetcherService, onMutated: () => void): NonNullable<TableProps<Container>['columns']> {
-    return staticColumns.concat([
-        {
-            title: '',
-            key: 'actions',
-            align: 'right',
-            width: 120,
-            render: (_value: unknown, record: Container) => (
-                <ContainerRowActions
-                    fetcher={fetcher}
-                    containerName={record.name}
-                    state={record.state}
-                    onMutated={onMutated}
-                />
-            ),
-        },
-    ]);
+function buildColumns(
+    fetcher: DockerFetcherService,
+    navigate: NavigateFunction,
+    onMutated: () => void,
+): NonNullable<TableProps<Container>['columns']> {
+    const imageColumn: TableColumnType<Container> = {
+        title: 'Image',
+        key: 'image',
+        ellipsis: true,
+        render: (_value: unknown, record: Container) => renderImage(record, navigate),
+    };
+    const actionsColumn: TableColumnType<Container> = {
+        title: '',
+        key: 'actions',
+        align: 'right',
+        width: 120,
+        render: (_value: unknown, record: Container) => (
+            <ContainerRowActions
+                fetcher={fetcher}
+                containerName={record.name}
+                state={record.state}
+                onMutated={onMutated}
+            />
+        ),
+    };
+    return [nameColumn, imageColumn].concat(staticColumns).concat([actionsColumn]);
 }
 
 function ContainerList(props: ContainerListProps): ReactElement {
@@ -153,7 +193,7 @@ function ContainerList(props: ContainerListProps): ReactElement {
             />
         );
     }
-    const columns: NonNullable<TableProps<Container>['columns']> = buildColumns(props.fetcher, handleMutated);
+    const columns: NonNullable<TableProps<Container>['columns']> = buildColumns(props.fetcher, navigate, handleMutated);
 
     let visibleContainers: Container[];
     if (showAll) {
@@ -186,7 +226,7 @@ function ContainerList(props: ContainerListProps): ReactElement {
                 />
             </Flex>
             <Table<Container>
-                className="app-container-table"
+                className="app-hover-actions-table"
                 tableLayout="fixed"
                 columns={columns}
                 dataSource={visibleContainers}

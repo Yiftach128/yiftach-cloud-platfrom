@@ -15,3 +15,7 @@ export interface NewContainerPageProps {
 export interface ImagesPageProps {
     fetcher: DockerFetcherService;
 }
+
+export interface ImageDetailsPageProps {
+    fetcher: DockerFetcherService;
+}

@@ -4,6 +4,26 @@
 
 body {
     margin: 0;
+    /* UI chrome (buttons, menus, cards, breadcrumbs, table headers, ...) is
+       never text-selectable; copyable content opts back in below. */
+    user-select: none;
+}
+
+/* Copyable content: form fields, table body values (headers stay chrome),
+   description values, alert text, and log output. */
+input,
+textarea,
+.ant-table-tbody .ant-table-cell,
+.ant-descriptions-item-content,
+.ant-alert,
+.app-log-output {
+    user-select: text;
+}
+
+/* Chrome nested inside a selectable region (e.g. row-action buttons living in
+   table cells) goes back to non-selectable. */
+.ant-btn {
+    user-select: none;
 }
 
 /* Height comes from app-layout.tsx (headerRowHeight), shared with the content-side
@@ -48,20 +68,20 @@ body {
     background-color: #8c8c8c;
 }
 
-/* Services-list row actions: invisible (but layout-preserving) until the row
-   is hovered or holds keyboard focus. pointer-events blocks clicks on the
-   invisible buttons. The -pinned modifier keeps them visible while an action
-   runs or the delete Popconfirm is open — the pointer then sits in the
-   portaled popup, so the row loses :hover. */
-.app-container-table .app-row-actions {
+/* Row actions in the services and images tables: invisible (but
+   layout-preserving) until the row is hovered or holds keyboard focus.
+   pointer-events blocks clicks on the invisible buttons. The -pinned modifier
+   keeps them visible while an action runs or the delete Popconfirm is open —
+   the pointer then sits in the portaled popup, so the row loses :hover. */
+.app-hover-actions-table .app-row-actions {
     opacity: 0;
     pointer-events: none;
     transition: opacity 0.15s ease-in-out;
 }
 
-.app-container-table .ant-table-row:hover .app-row-actions,
-.app-container-table .ant-table-row:focus-within .app-row-actions,
-.app-container-table .app-row-actions-pinned {
+.app-hover-actions-table .ant-table-row:hover .app-row-actions,
+.app-hover-actions-table .ant-table-row:focus-within .app-row-actions,
+.app-hover-actions-table .app-row-actions-pinned {
     opacity: 1;
     pointer-events: auto;
 }
