@@ -152,10 +152,23 @@ classes; JSX files use `.tsx`).
   `DockerFetcherError`, so axios never leaks into components. Wire types in
   `fetchers/interfaces.ts` mirror the platform backend's `interfaces.ts`, except
   JSON-serialized fields (backend `Date` → frontend ISO `string`).
+- **Skeletons only when there is nothing to show; re-fetches are silent.** A view renders
+  a loading `Skeleton` only while it has no data yet — first load, or navigation to a
+  *different* entity. Once content is on screen, re-fetches keep the stale content
+  rendered and swap it when fresh data arrives; a failed re-fetch shows a non-destructive
+  `Alert` above the kept content (cleared by the next success) instead of replacing it.
+  Only an initial-load failure may replace the body with an error alert. The mechanism is
+  `src/hooks/use-fetched-data.ts` — every non-polling component fetch goes through it
+  rather than hand-rolling `useEffect` + disposed flags (`requestKey` carries the entity
+  identity; `resetOnKeyChange` chooses reset-to-skeleton vs. keep-stale when it changes,
+  e.g. the new-container wizard keeps the current form while a newly picked image's
+  prefill loads). The polling panels (`container-logs-panel.tsx`,
+  `build-progress-panel.tsx`) keep their own timeout loops — polling is a different
+  lifecycle — but follow the same skeleton-per-session and inline-alert rules.
 - The GitHub source in the new-container wizard submits the build **and** the container
   config in one `POST /builds`; the builder service creates the container server-side,
   so the wizard only watches the job (`queued` → `running` → terminal) and navigates to
-  the container when it succeeds. It never calls `POST /containers` for that source.
+  My Services when it succeeds. It never calls `POST /containers` for that source.
 - Clicking a My Images row opens `/images/:imageId` (short id in the URL — the daemon
   resolves it as an id prefix): `components/image-details.tsx`, fed by
   `GET /api/v1/images/:id`, showing the basics, the EXPOSEd ports, and the builder's

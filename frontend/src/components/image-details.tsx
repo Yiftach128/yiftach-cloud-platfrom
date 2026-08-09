@@ -2,13 +2,14 @@ import { Alert, Descriptions, Divider, Flex, Skeleton, Tag, Tooltip, Typography 
 import type { DescriptionsProps } from 'antd';
 import dayjs from 'dayjs';
 import relativeTime from 'dayjs/plugin/relativeTime';
-import { useEffect, useState } from 'react';
 import type { ReactElement } from 'react';
 
 dayjs.extend(relativeTime);
 
 import { DockerFetcherError } from '../fetchers/docker-fetcher-error.ts';
 import type { ImageDetails as ImageDetailsData, ImageExposedPort } from '../fetchers/interfaces.ts';
+import { useFetchedData } from '../hooks/use-fetched-data.ts';
+import type { FetchedData } from '../hooks/interfaces.ts';
 import { formatTimestamp } from './container-format.ts';
 import ImageControls from './image-controls.tsx';
 import { formatSizeBytes } from './image-format.ts';
@@ -134,68 +135,52 @@ function hasProvenance(labels: Record<string, string>): boolean {
  * provenance the builder stamped as labels.
  */
 function ImageDetails(props: ImageDetailsProps): ReactElement {
-    const [details, setDetails] = useState<ImageDetailsData | null>(null);
-    const [errorMessage, setErrorMessage] = useState<string | null>(null);
-    const [isLoading, setIsLoading] = useState<boolean>(true);
+    function describeLoadError(error: unknown): string {
+        if (error instanceof DockerFetcherError) {
+            if (error.status === 404) {
+                return `No image "${props.imageId}" was found.`;
+            }
+            return error.message;
+        }
+        return 'Unexpected error while loading image details';
+    }
 
-    useEffect(() => {
-        let disposed: boolean = false;
+    /* The component stays mounted when only :imageId changes; the key reset
+       drops the old image's data so the new one starts from a skeleton. */
+    const fetched: FetchedData<ImageDetailsData> = useFetchedData<ImageDetailsData>({
+        fetch: () => props.fetcher.getImageDetails(props.imageId),
+        describeError: describeLoadError,
+        requestKey: props.imageId,
+        resetOnKeyChange: true,
+    });
 
-        /* The component stays mounted when only :imageId changes, so every
-           (re-)fetch starts from a clean slate. */
-        setIsLoading(true);
-        setErrorMessage(null);
-        setDetails(null);
-
-        props.fetcher.getImageDetails(props.imageId)
-            .then((result: ImageDetailsData) => {
-                if (!disposed) {
-                    setDetails(result);
-                    setIsLoading(false);
-                }
-            })
-            .catch((error: unknown) => {
-                if (!disposed) {
-                    if (error instanceof DockerFetcherError) {
-                        if (error.status === 404) {
-                            setErrorMessage(`No image "${props.imageId}" was found.`);
-                        } else {
-                            setErrorMessage(error.message);
-                        }
-                    } else {
-                        setErrorMessage('Unexpected error while loading image details');
-                    }
-                    setIsLoading(false);
-                }
-            });
-
-        return () => {
-            disposed = true;
-        };
-    }, [props.fetcher, props.imageId]);
-
-    if (errorMessage !== null) {
+    if (fetched.data === null && fetched.errorMessage !== null) {
         return (
             <Alert
                 type="error"
                 showIcon
                 message="Failed to load image"
-                description={errorMessage}
+                description={fetched.errorMessage}
             />
         );
     }
-    if (isLoading) {
+    if (fetched.data === null) {
         return <Skeleton active paragraph={{ rows: 6 }} />;
     }
-    if (details === null) {
-        return (
+    const details: ImageDetailsData = fetched.data;
+
+    let refreshAlert: ReactElement | null;
+    if (fetched.errorMessage !== null) {
+        refreshAlert = (
             <Alert
                 type="error"
                 showIcon
-                message="Failed to load image"
-                description="No image data was returned."
+                message="Failed to refresh image"
+                description={fetched.errorMessage}
             />
         );
+    } else {
+        refreshAlert = null;
     }
 
     let provenanceSection: ReactElement;
@@ -231,6 +216,7 @@ function ImageDetails(props: ImageDetailsProps): ReactElement {
 
     return (
         <Flex vertical gap={24}>
+            {refreshAlert}
             <ImageControls fetcher={props.fetcher} imageId={details.id} primaryTag={primaryTag} />
             <Divider style={{ margin: 0 }} />
             <Descriptions title="Overview" bordered size="small" column={1} items={buildOverviewItems(details)} />

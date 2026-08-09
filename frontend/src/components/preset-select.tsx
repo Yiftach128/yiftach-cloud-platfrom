@@ -1,60 +1,44 @@
 import { Alert, Card, Flex, Skeleton, Typography } from 'antd';
-import { useEffect, useState } from 'react';
 import type { ReactElement } from 'react';
 
 import { DockerFetcherError } from '../fetchers/docker-fetcher-error.ts';
 import type { ImagePreset } from '../fetchers/interfaces.ts';
+import { useFetchedData } from '../hooks/use-fetched-data.ts';
+import type { FetchedData } from '../hooks/interfaces.ts';
 import type { PresetSelectProps } from './interfaces.ts';
 
 /** Matches the theme's grey primary; drawn as a stronger border on the selected card. */
 const SELECTED_BORDER = '2px solid #595959';
 
+function describeLoadError(error: unknown): string {
+    if (error instanceof DockerFetcherError) {
+        return error.message;
+    }
+    return 'Unexpected error while loading presets';
+}
+
 function PresetSelect(props: PresetSelectProps): ReactElement {
-    const [presets, setPresets] = useState<ImagePreset[]>([]);
-    const [isLoading, setIsLoading] = useState<boolean>(true);
-    const [errorMessage, setErrorMessage] = useState<string | null>(null);
+    const fetched: FetchedData<ImagePreset[]> = useFetchedData<ImagePreset[]>({
+        fetch: () => props.fetcher.getImagePresets(),
+        describeError: describeLoadError,
+        requestKey: 'presets',
+        resetOnKeyChange: true,
+    });
 
-    useEffect(() => {
-        let disposed = false;
-
-        async function load(): Promise<void> {
-            try {
-                const fetched: ImagePreset[] = await props.fetcher.getImagePresets();
-                if (!disposed) {
-                    setPresets(fetched);
-                    setIsLoading(false);
-                }
-            } catch (error) {
-                if (!disposed) {
-                    if (error instanceof DockerFetcherError) {
-                        setErrorMessage(error.message);
-                    } else {
-                        setErrorMessage('Unexpected error while loading presets');
-                    }
-                    setIsLoading(false);
-                }
-            }
-        }
-
-        void load();
-        return () => {
-            disposed = true;
-        };
-    }, [props.fetcher]);
-
-    if (errorMessage !== null) {
+    if (fetched.data === null && fetched.errorMessage !== null) {
         return (
             <Alert
                 type="error"
                 showIcon
                 message="Failed to load presets"
-                description={errorMessage}
+                description={fetched.errorMessage}
             />
         );
     }
-    if (isLoading) {
+    if (fetched.data === null) {
         return <Skeleton active paragraph={{ rows: 3 }} />;
     }
+    const presets: ImagePreset[] = fetched.data;
 
     return (
         <Flex gap={16} wrap>

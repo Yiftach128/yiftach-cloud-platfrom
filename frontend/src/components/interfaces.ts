@@ -116,12 +116,50 @@ export interface SourceKindSelectProps {
 export interface PortRowValue {
     hostPort?: number;
     containerPort?: number;
+    /**
+     * True when the container port came from trusted image metadata (a preset's
+     * catalog value or the image's own EXPOSE) and renders read-only. Absent on
+     * user-added rows.
+     */
+    locked?: boolean;
 }
 
 /** One row of the user-added env var list. */
 export interface EnvRowValue {
     name?: string;
     value?: string;
+}
+
+/**
+ * One mount-time snapshot of what existing containers already claim; drives
+ * default suggestions and inline conflict validation in the wizard.
+ */
+export interface TakenResources {
+    /** Host ports published by running containers (stopped ones don't report theirs). */
+    hostPorts: Set<number>;
+    /** Names of all containers, running and stopped — a name conflicts regardless of state. */
+    names: Set<string>;
+}
+
+/**
+ * The image prefill currently applied to the rendered form on the wizard's
+ * image step. image null = the bare form (no ?image= applied); ports null =
+ * the image declared no TCP EXPOSEs or the lookup failed (best-effort).
+ */
+export interface AppliedImagePrefill {
+    image: string | null;
+    ports: number[] | null;
+}
+
+/**
+ * A pasted GitHub URL decomposed by normalizeGitHubUrl; `gitUrl` is the
+ * canonical repository root, with any branch/tag moved into `gitRef`.
+ */
+export interface GitHubUrlParts {
+    gitUrl: string;
+    owner: string;
+    repo: string;
+    gitRef?: string;
 }
 
 /** Values the container config form edits; optional members belong to other source kinds. */
@@ -131,6 +169,8 @@ export interface ContainerConfigFormValues {
     image?: string;
     /** GitHub repository URL, when the source kind is 'github'. */
     gitUrl?: string;
+    /** Optional branch or tag to build, when the source kind is 'github'; empty builds the default branch. */
+    gitRef?: string;
     /** Optional image reference used as the built image's tag, when the source kind is 'github'. */
     imageName?: string;
     ports: PortRowValue[];
@@ -144,6 +184,36 @@ export interface ContainerConfigFormProps {
     initialValues: ContainerConfigFormValues;
     /** Preset-declared env vars rendered as fixed rows; only for source kind 'preset'. */
     presetEnvVars?: PresetEnvVar[];
+    /**
+     * Host ports currently published by containers, per the list endpoint —
+     * which only reports them for running containers, so a stopped container's
+     * reserved bindings are invisible here. Drives the inline conflict
+     * validation on the host-port fields.
+     */
+    takenHostPorts: Set<number>;
+    /**
+     * Names of all existing containers, stopped ones included (a name
+     * conflicts regardless of state). Drives the inline conflict validation
+     * on the name field and the GitHub repo-name suggestion.
+     */
+    takenNames: Set<string>;
+    /** Managed image tags offered by the image-reference picker; only for source kind 'image'. */
+    managedImageTags?: string[];
+    /**
+     * The managed image whose EXPOSEs produced the locked ports rows. Locks
+     * apply only while the image field still equals it — editing the reference
+     * soft-unlocks the rows. Absent for presets, whose locks are unconditional.
+     */
+    prefillImage?: string;
+    /** Called when a managed image is chosen from the picker's dropdown (not on free typing). */
+    onManagedImageSelected?: (tag: string) => void;
+    /**
+     * Looks up the TCP container ports a locally present image EXPOSEs, for
+     * free-typed references (rejects when the image is not local — the form
+     * treats that as best-effort and leaves the rows alone). Only for source
+     * kind 'image'.
+     */
+    onLookupExposedPorts?: (reference: string) => Promise<number[]>;
     /** Disables the form and marks the submit button loading while a create runs. */
     pending: boolean;
     onSubmit: (values: ContainerConfigFormValues) => void;

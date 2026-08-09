@@ -2,7 +2,6 @@ import { Alert, Flex, Table, Tag, Tooltip, Typography } from 'antd';
 import type { TableProps } from 'antd';
 import dayjs from 'dayjs';
 import relativeTime from 'dayjs/plugin/relativeTime';
-import { useEffect, useState } from 'react';
 import type { ReactElement } from 'react';
 import { useNavigate } from 'react-router';
 
@@ -11,6 +10,8 @@ dayjs.extend(relativeTime);
 import { DockerFetcherError } from '../fetchers/docker-fetcher-error.ts';
 import type { DockerFetcherService } from '../fetchers/docker-fetcher-service.ts';
 import type { ImageSummary } from '../fetchers/interfaces.ts';
+import { useFetchedData } from '../hooks/use-fetched-data.ts';
+import type { FetchedData } from '../hooks/interfaces.ts';
 import { formatTimestamp } from './container-format.ts';
 import { formatSizeBytes, shortImageId } from './image-format.ts';
 import ImageRowActions from './image-row-actions.tsx';
@@ -111,80 +112,83 @@ function buildColumns(fetcher: DockerFetcherService, onMutated: () => void): Non
  * create-container and delete actions. Registry-pulled images never appear —
  * the backend lists only images labeled cloudplatform.managed=true.
  */
+function describeLoadError(error: unknown): string {
+    if (error instanceof DockerFetcherError) {
+        return error.message;
+    }
+    return 'Unexpected error while loading images';
+}
+
 function ImageList(props: ImageListProps): ReactElement {
     const navigate = useNavigate();
-    const [images, setImages] = useState<ImageSummary[]>([]);
-    const [errorMessage, setErrorMessage] = useState<string | null>(null);
-    const [isLoading, setIsLoading] = useState<boolean>(true);
-    const [reloadCounter, setReloadCounter] = useState<number>(0);
 
-    useEffect(() => {
-        let disposed: boolean = false;
+    /* Re-fetches (reload after a delete) are silent per the hook contract —
+       the remaining rows stay rendered without a table flash. */
+    const fetched: FetchedData<ImageSummary[]> = useFetchedData<ImageSummary[]>({
+        fetch: () => props.fetcher.getImages(),
+        describeError: describeLoadError,
+        requestKey: 'images',
+        resetOnKeyChange: true,
+    });
 
-        /* Re-fetches (reloadCounter bumps after a delete) are deliberately
-           silent — no loading/images reset — so the remaining rows stay
-           rendered without a table flash. */
-        props.fetcher.getImages()
-            .then((result: ImageSummary[]) => {
-                if (!disposed) {
-                    setImages(result);
-                    setIsLoading(false);
-                }
-            })
-            .catch((error: unknown) => {
-                if (!disposed) {
-                    if (error instanceof DockerFetcherError) {
-                        setErrorMessage(error.message);
-                    } else {
-                        setErrorMessage('Unexpected error while loading images');
-                    }
-                    setIsLoading(false);
-                }
-            });
-
-        return () => {
-            disposed = true;
-        };
-    }, [props.fetcher, reloadCounter]);
-
-    function handleMutated(): void {
-        setReloadCounter((value: number) => value + 1);
-    }
-
-    if (errorMessage !== null) {
+    if (fetched.data === null && fetched.errorMessage !== null) {
         return (
             <Alert
                 type="error"
                 showIcon
                 message="Failed to load images"
-                description={errorMessage}
+                description={fetched.errorMessage}
             />
         );
     }
 
-    const columns: NonNullable<TableProps<ImageSummary>['columns']> = buildColumns(props.fetcher, handleMutated);
+    let images: ImageSummary[];
+    if (fetched.data === null) {
+        images = [];
+    } else {
+        images = fetched.data;
+    }
+
+    let refreshAlert: ReactElement | null;
+    if (fetched.data !== null && fetched.errorMessage !== null) {
+        refreshAlert = (
+            <Alert
+                type="error"
+                showIcon
+                message="Failed to refresh images"
+                description={fetched.errorMessage}
+            />
+        );
+    } else {
+        refreshAlert = null;
+    }
+
+    const columns: NonNullable<TableProps<ImageSummary>['columns']> = buildColumns(props.fetcher, fetched.reload);
 
     return (
-        <Table<ImageSummary>
-            className="app-hover-actions-table"
-            tableLayout="fixed"
-            columns={columns}
-            dataSource={images}
-            rowKey="id"
-            loading={isLoading}
-            pagination={false}
-            locale={{
-                emptyText: 'No platform-built images yet. Build one from a GitHub repository via New Service > GitHub Repository.',
-            }}
-            onRow={(record: ImageSummary) => ({
-                onClick: (): void => {
-                    /* The short id keeps the URL and breadcrumb readable; the
-                       daemon resolves it like any id prefix. */
-                    navigate(`/images/${encodeURIComponent(shortImageId(record.id))}`);
-                },
-                style: { cursor: 'pointer' },
-            })}
-        />
+        <Flex vertical gap={12}>
+            {refreshAlert}
+            <Table<ImageSummary>
+                className="app-hover-actions-table"
+                tableLayout="fixed"
+                columns={columns}
+                dataSource={images}
+                rowKey="id"
+                loading={fetched.isInitialLoading}
+                pagination={false}
+                locale={{
+                    emptyText: 'No platform-built images yet. Build one from a GitHub repository via New Service > GitHub Repository.',
+                }}
+                onRow={(record: ImageSummary) => ({
+                    onClick: (): void => {
+                        /* The short id keeps the URL and breadcrumb readable; the
+                           daemon resolves it like any id prefix. */
+                        navigate(`/images/${encodeURIComponent(shortImageId(record.id))}`);
+                    },
+                    style: { cursor: 'pointer' },
+                })}
+            />
+        </Flex>
     );
 }
 

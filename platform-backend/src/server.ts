@@ -17,6 +17,7 @@ import { getContainerLogsRoute } from './routes/get-container-logs.ts';
 import { getContainerRoute } from './routes/get-container.ts';
 import { getContainersRoute } from './routes/get-containers.ts';
 import { getHealthRoute } from './routes/get-health.ts';
+import { getImageExposedPortsRoute } from './routes/get-image-exposed-ports.ts';
 import { getImagePresetsRoute } from './routes/get-image-presets.ts';
 import { getImageRoute } from './routes/get-image.ts';
 import { getImagesRoute } from './routes/get-images.ts';
@@ -91,6 +92,7 @@ app.use('/api/v1', postContainerStopRoute(docker));
 app.use('/api/v1', postContainerRestartRoute(docker));
 app.use('/api/v1', getImagePresetsRoute(imagePresets));
 app.use('/api/v1', getImagesRoute(dockerImages));
+app.use('/api/v1', getImageExposedPortsRoute(dockerImages)); // two segments — never captured by :id
 app.use('/api/v1', getImageRoute(dockerImages)); // after presets: /images/presets must not match :id
 app.use('/api/v1', deleteImageRoute(dockerImages));
 app.use('/api/v1', postBuildRoute(imageBuilds));

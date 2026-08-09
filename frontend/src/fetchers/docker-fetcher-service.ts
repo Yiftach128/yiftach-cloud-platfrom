@@ -10,6 +10,7 @@ import type {
     CreateContainerRequest,
     GetContainerLogsOptions,
     ImageDetails,
+    ImageExposedPort,
     ImagePreset,
     ImageSummary,
     StartBuildRequest,
@@ -64,6 +65,22 @@ export class DockerFetcherService {
         try {
             const encoded: string = encodeURIComponent(idOrReference);
             const response: AxiosResponse<ImageDetails> = await this.http.get(`/images/${encoded}`);
+            return response.data;
+        } catch (error) {
+            throw this.toFetcherError(error);
+        }
+    }
+
+    /**
+     * The ports a locally present image EXPOSEs, by id or reference, managed
+     * or not; the backend answers 404 for references the daemon does not hold
+     * locally (the registry is never consulted).
+     */
+    public async getImageExposedPorts(reference: string): Promise<ImageExposedPort[]> {
+        try {
+            const encoded: string = encodeURIComponent(reference);
+            const response: AxiosResponse<ImageExposedPort[]> =
+                await this.http.get(`/images/${encoded}/exposed-ports`);
             return response.data;
         } catch (error) {
             throw this.toFetcherError(error);

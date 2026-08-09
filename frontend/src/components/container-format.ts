@@ -24,6 +24,23 @@ export function stateTagColor(state: ContainerState): string {
     }
 }
 
+/**
+ * Collapses bindings that differ only by host IP — Docker publishes a port on
+ * both IPv4 (`0.0.0.0`) and IPv6 (`::`), and reports one entry per bind address.
+ */
+export function dedupePortBindings(ports: PortBinding[]): PortBinding[] {
+    const seen = new Set<string>();
+    const unique: PortBinding[] = [];
+    for (const port of ports) {
+        const key = `${port.publicPort}:${port.privatePort}/${port.type}`;
+        if (!seen.has(key)) {
+            seen.add(key);
+            unique.push(port);
+        }
+    }
+    return unique;
+}
+
 export function formatPorts(ports: PortBinding[]): string {
     return ports
         .map((port: PortBinding) => {

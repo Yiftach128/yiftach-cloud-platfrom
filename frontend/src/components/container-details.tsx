@@ -2,7 +2,7 @@ import { Alert, Descriptions, Divider, Flex, Skeleton, Splitter, Table, Tag, Too
 import type { DescriptionsProps, TableProps } from 'antd';
 import dayjs from 'dayjs';
 import relativeTime from 'dayjs/plugin/relativeTime';
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import type { ReactElement } from 'react';
 
 dayjs.extend(relativeTime);
@@ -20,6 +20,8 @@ import type {
     NetworkAttachment,
     PortBinding,
 } from '../fetchers/interfaces.ts';
+import { useFetchedData } from '../hooks/use-fetched-data.ts';
+import type { FetchedData } from '../hooks/interfaces.ts';
 import ContainerControls from './container-controls.tsx';
 import ContainerLogsPanel from './container-logs-panel.tsx';
 import { formatTimestamp, stateTagColor } from './container-format.ts';
@@ -251,78 +253,61 @@ const networkColumns: TableProps<NetworkAttachment>['columns'] = [
 ];
 
 function ContainerDetails(props: ContainerDetailsProps): ReactElement {
-    const [details, setDetails] = useState<ContainerDetailsData | null>(null);
-    const [errorMessage, setErrorMessage] = useState<string | null>(null);
-    const [isLoading, setIsLoading] = useState<boolean>(true);
-    const [reloadCounter, setReloadCounter] = useState<number>(0);
-    const [logsOpen, setLogsOpen] = useState<boolean>(false);
+    const [logsOpen, setLogsOpen] = useState<boolean>(true);
 
-    useEffect(() => {
-        let disposed: boolean = false;
-
-        /* The component stays mounted when only :containerName changes, so every
-           (re-)fetch starts from a clean slate. */
-        setIsLoading(true);
-        setErrorMessage(null);
-        setDetails(null);
-
-        props.fetcher.getContainer(props.containerName)
-            .then((result: ContainerDetailsData) => {
-                if (!disposed) {
-                    setDetails(result);
-                    setIsLoading(false);
-                }
-            })
-            .catch((error: unknown) => {
-                if (!disposed) {
-                    if (error instanceof DockerFetcherError) {
-                        if (error.status === 404) {
-                            setErrorMessage(`No container named "${props.containerName}" was found.`);
-                        } else {
-                            setErrorMessage(error.message);
-                        }
-                    } else {
-                        setErrorMessage('Unexpected error while loading container details');
-                    }
-                    setIsLoading(false);
-                }
-            });
-
-        return () => {
-            disposed = true;
-        };
-    }, [props.fetcher, props.containerName, reloadCounter]);
-
-    function handleMutated(): void {
-        setReloadCounter((value: number) => value + 1);
+    function describeLoadError(error: unknown): string {
+        if (error instanceof DockerFetcherError) {
+            if (error.status === 404) {
+                return `No container named "${props.containerName}" was found.`;
+            }
+            return error.message;
+        }
+        return 'Unexpected error while loading container details';
     }
+
+    /* The component stays mounted when only :containerName changes; the key
+       reset drops the old container's data so the new one starts from a
+       skeleton. Same-name re-fetches (toolbar actions via reload) are silent —
+       the toolbar and the logs panel stay mounted, so the tail session
+       survives Start/Stop/Restart/Clear-Logs. */
+    const fetched: FetchedData<ContainerDetailsData> = useFetchedData<ContainerDetailsData>({
+        fetch: () => props.fetcher.getContainer(props.containerName),
+        describeError: describeLoadError,
+        requestKey: props.containerName,
+        resetOnKeyChange: true,
+    });
 
     function handleToggleLogs(): void {
         setLogsOpen((value: boolean) => !value);
     }
 
-    if (errorMessage !== null) {
+    if (fetched.data === null && fetched.errorMessage !== null) {
         return (
             <Alert
                 type="error"
                 showIcon
                 message="Failed to load container"
-                description={errorMessage}
+                description={fetched.errorMessage}
             />
         );
     }
-    if (isLoading) {
+    if (fetched.data === null) {
         return <Skeleton active paragraph={{ rows: 8 }} />;
     }
-    if (details === null) {
-        return (
+    const details: ContainerDetailsData = fetched.data;
+
+    let refreshAlert: ReactElement | null;
+    if (fetched.errorMessage !== null) {
+        refreshAlert = (
             <Alert
                 type="error"
                 showIcon
-                message="Failed to load container"
-                description="No container data was returned."
+                message="Failed to refresh container"
+                description={fetched.errorMessage}
             />
         );
+    } else {
+        refreshAlert = null;
     }
 
     let healthSection: ReactElement | null = null;
@@ -377,7 +362,8 @@ function ContainerDetails(props: ContainerDetailsProps): ReactElement {
            right, divider draggable. The height pins the split to the viewport:
            100vh minus the layout header (56 + 1 divider), content padding
            (24 + 24), the toolbar row (32), its divider (1), and two Flex
-           gaps (24 + 24). */
+           gaps (24 + 24). The transient refresh alert is not budgeted — while
+           it shows, the page scrolls slightly. */
         content = (
             <Splitter style={{ height: 'calc(100vh - 186px)' }}>
                 <Splitter.Panel defaultSize="55%" min="25%">
@@ -396,13 +382,14 @@ function ContainerDetails(props: ContainerDetailsProps): ReactElement {
 
     return (
         <Flex vertical gap={24}>
+            {refreshAlert}
             <ContainerControls
                 fetcher={props.fetcher}
                 containerName={props.containerName}
                 running={details.state.running}
                 logsOpen={logsOpen}
                 onToggleLogs={handleToggleLogs}
-                onMutated={handleMutated}
+                onMutated={fetched.reload}
             />
             <Divider style={{ margin: 0 }} />
             {content}

@@ -3,7 +3,7 @@ import { Alert, Flex, Space, Switch, Table, Tag, Tooltip, Typography } from 'ant
 import type { TableColumnType, TableProps } from 'antd';
 import dayjs from 'dayjs';
 import relativeTime from 'dayjs/plugin/relativeTime';
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import type { MouseEvent, ReactElement } from 'react';
 import { useNavigate } from 'react-router';
 import type { NavigateFunction } from 'react-router';
@@ -13,7 +13,9 @@ dayjs.extend(relativeTime);
 import { DockerFetcherError } from '../fetchers/docker-fetcher-error.ts';
 import type { DockerFetcherService } from '../fetchers/docker-fetcher-service.ts';
 import type { Container, ContainerState, PortBinding } from '../fetchers/interfaces.ts';
-import { formatPorts, formatTimestamp, stateTagColor } from './container-format.ts';
+import { useFetchedData } from '../hooks/use-fetched-data.ts';
+import type { FetchedData } from '../hooks/interfaces.ts';
+import { dedupePortBindings, formatPorts, formatTimestamp, stateTagColor } from './container-format.ts';
 import ContainerRowActions from './container-row-actions.tsx';
 import { shortImageId } from './image-format.ts';
 import type { ContainerListProps } from './interfaces.ts';
@@ -101,7 +103,7 @@ const staticColumns: NonNullable<TableProps<Container>['columns']> = [
         dataIndex: 'ports',
         key: 'ports',
         width: 150,
-        render: (ports: PortBinding[]) => formatPorts(ports),
+        render: (ports: PortBinding[]) => formatPorts(dedupePortBindings(ports)),
     },
     {
         title: 'Created',
@@ -142,58 +144,60 @@ function buildColumns(
     return [nameColumn, imageColumn].concat(staticColumns).concat([actionsColumn]);
 }
 
+function describeLoadError(error: unknown): string {
+    if (error instanceof DockerFetcherError) {
+        return error.message;
+    }
+    return 'Unexpected error while loading containers';
+}
+
 function ContainerList(props: ContainerListProps): ReactElement {
     const navigate = useNavigate();
-    const [containers, setContainers] = useState<Container[]>([]);
-    const [errorMessage, setErrorMessage] = useState<string | null>(null);
-    const [isLoading, setIsLoading] = useState<boolean>(true);
-    const [reloadCounter, setReloadCounter] = useState<number>(0);
     const [showAll, setShowAll] = useState<boolean>(false);
 
-    useEffect(() => {
-        let disposed: boolean = false;
+    /* Re-fetches (reload after a row action) are silent per the hook contract —
+       the existing rows stay rendered and the hovered row's toolbar does not
+       flash away. */
+    const fetched: FetchedData<Container[]> = useFetchedData<Container[]>({
+        fetch: () => props.fetcher.getContainers(),
+        describeError: describeLoadError,
+        requestKey: 'containers',
+        resetOnKeyChange: true,
+    });
 
-        /* Re-fetches (reloadCounter bumps after a row action) are deliberately
-           silent — no loading/containers reset — so the existing rows stay
-           rendered and the hovered row's toolbar does not flash away. */
-        props.fetcher.getContainers()
-            .then((result: Container[]) => {
-                if (!disposed) {
-                    setContainers(result);
-                    setIsLoading(false);
-                }
-            })
-            .catch((error: unknown) => {
-                if (!disposed) {
-                    if (error instanceof DockerFetcherError) {
-                        setErrorMessage(error.message);
-                    } else {
-                        setErrorMessage('Unexpected error while loading containers');
-                    }
-                    setIsLoading(false);
-                }
-            });
-
-        return () => {
-            disposed = true;
-        };
-    }, [props.fetcher, reloadCounter]);
-
-    function handleMutated(): void {
-        setReloadCounter((value: number) => value + 1);
-    }
-
-    if (errorMessage !== null) {
+    if (fetched.data === null && fetched.errorMessage !== null) {
         return (
             <Alert
                 type="error"
                 showIcon
                 message="Failed to load containers"
-                description={errorMessage}
+                description={fetched.errorMessage}
             />
         );
     }
-    const columns: NonNullable<TableProps<Container>['columns']> = buildColumns(props.fetcher, navigate, handleMutated);
+
+    let containers: Container[];
+    if (fetched.data === null) {
+        containers = [];
+    } else {
+        containers = fetched.data;
+    }
+
+    let refreshAlert: ReactElement | null;
+    if (fetched.data !== null && fetched.errorMessage !== null) {
+        refreshAlert = (
+            <Alert
+                type="error"
+                showIcon
+                message="Failed to refresh containers"
+                description={fetched.errorMessage}
+            />
+        );
+    } else {
+        refreshAlert = null;
+    }
+
+    const columns: NonNullable<TableProps<Container>['columns']> = buildColumns(props.fetcher, navigate, fetched.reload);
 
     let visibleContainers: Container[];
     if (showAll) {
@@ -218,6 +222,7 @@ function ContainerList(props: ContainerListProps): ReactElement {
 
     return (
         <Flex vertical gap={12}>
+            {refreshAlert}
             <Flex justify="flex-start" align="center" gap={8}>
                 <Typography.Text>Show all containers on this device</Typography.Text>
                 <Switch
@@ -231,7 +236,7 @@ function ContainerList(props: ContainerListProps): ReactElement {
                 columns={columns}
                 dataSource={visibleContainers}
                 rowKey="id"
-                loading={isLoading}
+                loading={fetched.isInitialLoading}
                 pagination={false}
                 locale={tableLocale}
                 onRow={(record: Container) => ({

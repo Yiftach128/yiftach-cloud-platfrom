@@ -22,6 +22,7 @@ import type {
     DockerImageProvider,
     DockerImageServiceOptions,
     ImageDetails,
+    ImageExposedPort,
     ImageSummary,
 } from './interfaces.ts';
 import { resolveDockerEndpoint } from './resolve-docker-endpoint.ts';
@@ -117,6 +118,22 @@ export class DockerImageService implements DockerImageProvider {
             }
         }
         return details;
+    }
+
+    /**
+     * The ports any locally present image EXPOSEs, managed or not — the
+     * create wizard uses this to prefill port rows for free-typed references
+     * like "nginx:latest". Deliberately unguarded by the managed label: it
+     * reveals only Dockerfile metadata, and the caller could learn the same
+     * by creating a container. The registry is never consulted — a reference
+     * the daemon does not hold locally surfaces as its 404
+     * {@link DockerApiError}.
+     */
+    async getImageExposedPorts(reference: string): Promise<ImageExposedPort[]> {
+        const raw = await this.requests.run(`GET /images/${reference}/json`, () =>
+            this.docker.getImage(reference).inspect(),
+        );
+        return toImageDetails(raw).exposedPorts;
     }
 
     /**
