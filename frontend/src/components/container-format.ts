@@ -56,6 +56,11 @@ export function formatTimestamp(iso: string): string {
     return dayjs(iso).format('YYYY-MM-DD HH:mm:ss');
 }
 
+/** "CPU" cell text, e.g. "3.4%" — the `docker stats` percentage, where 100 is one full core. */
+export function formatCpuPercent(cpuPercent: number): string {
+    return `${cpuPercent.toFixed(1)}%`;
+}
+
 /** True for states where Docker's inspect `State.Running` is true — where `stop` is the sensible toggle verb. */
 export function isRunningLike(state: ContainerState): boolean {
     switch (state) {

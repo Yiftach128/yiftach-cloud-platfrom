@@ -16,9 +16,12 @@ import type { FetchedData, UseFetchedDataOptions } from './interfaces.ts';
  * | Key change, reset true       | null           | null           | Skeleton (different entity)     |
  * | Key change, reset false      | kept           | kept           | Old content until settle        |
  * | enabled false                | kept           | kept           | No fetch; in-flight discarded   |
+ * | Poll tick (pollIntervalMs)   | kept in flight | kept in flight | Silent; swaps when settled      |
  *
- * Polling components (timeout chains with cursors and backoff) are a different
- * lifecycle and do not use this hook.
+ * pollIntervalMs re-runs the fetch on a fixed cadence with the same silent
+ * re-fetch contract. Polling components needing more than that — cursors,
+ * error backoff, line accumulation (the log and build panels) — are a
+ * different lifecycle and do not use this hook.
  */
 export function useFetchedData<T>(options: UseFetchedDataOptions<T>): FetchedData<T> {
     const [data, setData] = useState<T | null>(null);
@@ -47,6 +50,7 @@ export function useFetchedData<T>(options: UseFetchedDataOptions<T>): FetchedDat
             return;
         }
         let disposed: boolean = false;
+        let timer: number | undefined = undefined;
 
         if (optionsRef.current.resetOnKeyChange && lastKeyRef.current !== optionsRef.current.requestKey) {
             setData(null);
@@ -54,25 +58,39 @@ export function useFetchedData<T>(options: UseFetchedDataOptions<T>): FetchedDat
         }
         lastKeyRef.current = optionsRef.current.requestKey;
 
-        optionsRef.current.fetch()
-            .then((result: T) => {
-                if (!disposed) {
-                    setData(result);
-                    setErrorMessage(null);
+        async function run(): Promise<void> {
+            try {
+                const result: T = await optionsRef.current.fetch();
+                if (disposed) {
+                    return;
                 }
-            })
-            .catch((error: unknown) => {
-                if (!disposed) {
-                    /* Deliberately leaves data untouched: a failed re-fetch
-                       keeps the stale content rendered. */
-                    setErrorMessage(optionsRef.current.describeError(error));
+                setData(result);
+                setErrorMessage(null);
+            } catch (error) {
+                if (disposed) {
+                    return;
                 }
-            });
+                /* Deliberately leaves data untouched: a failed re-fetch keeps
+                   the stale content rendered. */
+                setErrorMessage(optionsRef.current.describeError(error));
+            }
+
+            const pollIntervalMs: number | undefined = optionsRef.current.pollIntervalMs;
+            if (pollIntervalMs !== undefined && !disposed) {
+                timer = window.setTimeout(run, pollIntervalMs);
+            }
+        }
+
+        run();
 
         /* Any deps change (reload, key change, enabled flip) or unmount runs
-           this first, so a slow old response can never overwrite a newer one. */
+           this first, so a slow old response can never overwrite a newer one
+           and no orphaned poll timer survives. */
         return () => {
             disposed = true;
+            if (timer !== undefined) {
+                clearTimeout(timer);
+            }
         };
     }, [options.requestKey, enabled, reloadCounter]);
 

@@ -23,6 +23,14 @@ export interface UseFetchedDataOptions<T> {
      * Absent means true.
      */
     enabled?: boolean;
+    /**
+     * When set, the fetch re-runs this many ms after each settle, with the
+     * same silent re-fetch contract (stale data stays rendered; a failure
+     * sets errorMessage until the next success). reload() and requestKey
+     * changes cancel the pending timer and fetch immediately. Absent means
+     * one fetch per requestKey/reload.
+     */
+    pollIntervalMs?: number;
 }
 
 /** What useFetchedData returns to the rendering component. */

@@ -21,6 +21,8 @@ import type {
     Container,
     ContainerDetails,
     ContainerLogs,
+    ContainerStats,
+    ContainerStatsMap,
     CreateContainerOptions,
     DeleteContainerOptions,
     DockerHostFiles,
@@ -34,6 +36,8 @@ import type {
 import { LogsNotClearableError } from './logs-not-clearable-error.ts';
 import { parseContainerLogs } from './parse-container-logs.ts';
 import { resolveDockerEndpoint } from './resolve-docker-endpoint.ts';
+import { toContainerStats } from './stats-mapper.ts';
+import type { RawContainerStats } from './stats-mapper.ts';
 import { toDaemonTimestamp } from './to-daemon-timestamp.ts';
 
 export * from './docker-api-error.ts';
@@ -107,6 +111,35 @@ export class DockerManagerService {
             this.docker.listContainers(listOptions),
         );
         return infos.map(toContainer);
+    }
+
+    /**
+     * One resource-usage sample per running container, keyed by full container
+     * id. Best-effort telemetry: each sample takes ~1 second (the daemon reads
+     * the CPU counters twice to make the delta computable), the per-container
+     * requests run in parallel, and a container whose sample fails — typically
+     * because it stopped right after being listed — is simply absent from the
+     * result instead of failing the whole map.
+     */
+    async getContainersStats(): Promise<ContainerStatsMap> {
+        const running: Container[] = await this.getContainers({ all: false });
+
+        const result: ContainerStatsMap = {};
+        await Promise.all(running.map(async (container: Container) => {
+            let raw: RawContainerStats;
+            try {
+                raw = await this.requests.run(`GET /containers/${container.id}/stats`, () =>
+                    this.docker.getContainer(container.id).stats({ stream: false }),
+                );
+            } catch {
+                return;
+            }
+            const stats: ContainerStats | null = toContainerStats(raw);
+            if (stats !== null) {
+                result[container.id] = stats;
+            }
+        }));
+        return result;
     }
 
     /**

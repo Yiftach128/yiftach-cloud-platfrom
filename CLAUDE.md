@@ -158,13 +158,15 @@ classes; JSX files use `.tsx`).
   rendered and swap it when fresh data arrives; a failed re-fetch shows a non-destructive
   `Alert` above the kept content (cleared by the next success) instead of replacing it.
   Only an initial-load failure may replace the body with an error alert. The mechanism is
-  `src/hooks/use-fetched-data.ts` — every non-polling component fetch goes through it
-  rather than hand-rolling `useEffect` + disposed flags (`requestKey` carries the entity
+  `src/hooks/use-fetched-data.ts` — component fetches go through it rather than
+  hand-rolling `useEffect` + disposed flags (`requestKey` carries the entity
   identity; `resetOnKeyChange` chooses reset-to-skeleton vs. keep-stale when it changes,
   e.g. the new-container wizard keeps the current form while a newly picked image's
-  prefill loads). The polling panels (`container-logs-panel.tsx`,
-  `build-progress-panel.tsx`) keep their own timeout loops — polling is a different
-  lifecycle — but follow the same skeleton-per-session and inline-alert rules.
+  prefill loads; `pollIntervalMs` adds a slow silent re-fetch cadence, e.g. the
+  container table's row refresh). Polling that needs more than a cadence — cursors,
+  error backoff, accumulation (`container-logs-panel.tsx`, `build-progress-panel.tsx`,
+  the container table's stats loop) — keeps its own timeout loop instead, but follows
+  the same skeleton-per-session and inline-alert rules.
 - The GitHub source in the new-container wizard submits the build **and** the container
   config in one `POST /builds`; the builder service creates the container server-side,
   so the wizard only watches the job (`queued` → `running` → terminal) and navigates to

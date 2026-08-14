@@ -15,6 +15,7 @@ import { deleteImageRoute } from './routes/delete-image.ts';
 import { getBuildRoute } from './routes/get-build.ts';
 import { getContainerLogsRoute } from './routes/get-container-logs.ts';
 import { getContainerRoute } from './routes/get-container.ts';
+import { getContainersStatsRoute } from './routes/get-containers-stats.ts';
 import { getContainersRoute } from './routes/get-containers.ts';
 import { getHealthRoute } from './routes/get-health.ts';
 import { getImageExposedPortsRoute } from './routes/get-image-exposed-ports.ts';
@@ -82,6 +83,7 @@ const app = express();
 app.use(express.json());
 app.use(getHealthRoute(docker)); // liveness probe stays unversioned
 app.use('/api/v1', getContainersRoute(docker));
+app.use('/api/v1', getContainersStatsRoute(docker)); // before :id — /containers/stats must not match :id
 app.use('/api/v1', getContainerRoute(docker));
 app.use('/api/v1', postContainerRoute(docker));
 app.use('/api/v1', deleteContainerRoute(docker));

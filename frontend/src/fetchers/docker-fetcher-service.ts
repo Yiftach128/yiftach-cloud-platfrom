@@ -7,6 +7,7 @@ import type {
     Container,
     ContainerDetails,
     ContainerLogs,
+    ContainerStatsMap,
     CreateContainerRequest,
     GetContainerLogsOptions,
     ImageDetails,
@@ -31,6 +32,20 @@ export class DockerFetcherService {
     public async getContainers(): Promise<Container[]> {
         try {
             const response: AxiosResponse<Container[]> = await this.http.get('/containers');
+            return response.data;
+        } catch (error) {
+            throw this.toFetcherError(error);
+        }
+    }
+
+    /**
+     * One live resource-usage sample per running container, keyed by container
+     * id. Takes about a second — the daemon reads each container's CPU
+     * counters twice to make the delta computable.
+     */
+    public async getContainersStats(): Promise<ContainerStatsMap> {
+        try {
+            const response: AxiosResponse<ContainerStatsMap> = await this.http.get('/containers/stats');
             return response.data;
         } catch (error) {
             throw this.toFetcherError(error);

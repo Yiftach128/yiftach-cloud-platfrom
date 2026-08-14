@@ -258,6 +258,26 @@ export interface ContainerLogs {
     lines: ContainerLogLine[];
 }
 
+/** Point-in-time resource usage of one running container, from GET /containers/stats. */
+export interface ContainerStats {
+    /**
+     * CPU usage as `docker stats` reports it: 100 means one full core, so a
+     * container busy on several cores can exceed 100.
+     */
+    cpuPercent: number;
+    /** Bytes of memory in use, excluding the reclaimable page cache (matches `docker stats`). */
+    memoryUsedBytes: number;
+    /** The container's memory limit in bytes — the host's total memory when unlimited. */
+    memoryLimitBytes: number;
+}
+
+/**
+ * One stats sample per running container, keyed by full container id. Stopped
+ * containers never appear; a running container can be absent when it vanished
+ * while the samples were being taken.
+ */
+export type ContainerStatsMap = Record<string, ContainerStats>;
+
 /**
  * One environment variable a preset's image understands (mirrors
  * platform-backend/src/services/images/interfaces.ts).

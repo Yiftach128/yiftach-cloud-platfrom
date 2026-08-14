@@ -3,7 +3,7 @@ import { Alert, Flex, Space, Switch, Table, Tag, Tooltip, Typography } from 'ant
 import type { TableColumnType, TableProps } from 'antd';
 import dayjs from 'dayjs';
 import relativeTime from 'dayjs/plugin/relativeTime';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { MouseEvent, ReactElement } from 'react';
 import { useNavigate } from 'react-router';
 import type { NavigateFunction } from 'react-router';
@@ -12,12 +12,12 @@ dayjs.extend(relativeTime);
 
 import { DockerFetcherError } from '../fetchers/docker-fetcher-error.ts';
 import type { DockerFetcherService } from '../fetchers/docker-fetcher-service.ts';
-import type { Container, ContainerState, PortBinding } from '../fetchers/interfaces.ts';
+import type { Container, ContainerState, ContainerStatsMap, PortBinding } from '../fetchers/interfaces.ts';
 import { useFetchedData } from '../hooks/use-fetched-data.ts';
 import type { FetchedData } from '../hooks/interfaces.ts';
-import { dedupePortBindings, formatPorts, formatTimestamp, stateTagColor } from './container-format.ts';
+import { dedupePortBindings, formatCpuPercent, formatPorts, formatTimestamp, stateTagColor } from './container-format.ts';
 import ContainerRowActions from './container-row-actions.tsx';
-import { shortImageId } from './image-format.ts';
+import { formatSizeBytes, shortImageId } from './image-format.ts';
 import type { ContainerListProps } from './interfaces.ts';
 
 /** Label stamped on every container the platform creates; the default view filters on it. */
@@ -29,6 +29,19 @@ const MANAGED_LABEL = 'cloudplatform.managed';
  * platform-built — preset and registry images never carry it.
  */
 const BUILD_JOB_ID_LABEL = 'cloudplatform.build-job-id';
+
+/**
+ * Delay between silent container-list re-fetches. Slow on purpose: actions
+ * taken in the UI reload immediately via row actions, so this only catches
+ * changes made outside the platform (docker CLI, a container exiting).
+ */
+const LIST_POLL_INTERVAL_MS: number = 15000;
+/** Delay between successful stats polls. */
+const STATS_POLL_INTERVAL_MS: number = 3000;
+/** Delay before retrying after a failed stats poll. */
+const STATS_POLL_ERROR_BACKOFF_MS: number = 10000;
+/** Cell text for containers without a live sample — stopped, or not sampled yet. */
+const NO_STATS_TEXT: string = '—';
 
 function formatCreatedAt(createdAt: string): string {
     return dayjs(createdAt).fromNow();
@@ -78,12 +91,33 @@ function renderImage(container: Container, navigate: NavigateFunction): ReactEle
     return <Typography.Link onClick={handleClick}>{container.image}</Typography.Link>;
 }
 
+/** "CPU" cell: live percentage where 100 is one full core; a dash without a sample. */
+function renderCpu(container: Container, stats: ContainerStatsMap): string {
+    const sample = stats[container.id];
+    if (sample === undefined) {
+        return NO_STATS_TEXT;
+    }
+    return formatCpuPercent(sample.cpuPercent);
+}
+
+/** "Memory" cell: live bytes in use, with the container's limit in the tooltip; a dash without a sample. */
+function renderMemory(container: Container, stats: ContainerStatsMap): ReactElement {
+    const sample = stats[container.id];
+    if (sample === undefined) {
+        return <>{NO_STATS_TEXT}</>;
+    }
+    const used: string = formatSizeBytes(sample.memoryUsedBytes);
+    const limit: string = formatSizeBytes(sample.memoryLimitBytes);
+    return <Tooltip title={`${used} of ${limit}`}>{used}</Tooltip>;
+}
+
 /* Width-less columns (Name, and Image in buildColumns) share the table's
    remaining space under the fixed layout; the bounded columns hold their pixel
-   widths. Image lives in buildColumns because its cell navigates. */
+   widths. Image lives in buildColumns because its cell navigates, CPU and
+   Memory in statsColumns because their cells read the live samples. */
 const nameColumn: TableColumnType<Container> = { title: 'Name', dataIndex: 'name', key: 'name', ellipsis: true };
 
-const staticColumns: NonNullable<TableProps<Container>['columns']> = [
+const stateColumns: NonNullable<TableProps<Container>['columns']> = [
     {
         title: 'Origin',
         key: 'origin',
@@ -98,6 +132,9 @@ const staticColumns: NonNullable<TableProps<Container>['columns']> = [
         render: (state: ContainerState) => <Tag color={stateTagColor(state)}>{state}</Tag>,
     },
     { title: 'Status', dataIndex: 'status', key: 'status', width: 180 },
+];
+
+const trailingColumns: NonNullable<TableProps<Container>['columns']> = [
     {
         title: 'Ports',
         dataIndex: 'ports',
@@ -116,10 +153,28 @@ const staticColumns: NonNullable<TableProps<Container>['columns']> = [
     },
 ];
 
+function statsColumns(stats: ContainerStatsMap): TableColumnType<Container>[] {
+    return [
+        {
+            title: 'CPU',
+            key: 'cpu',
+            width: 80,
+            render: (_value: unknown, record: Container) => renderCpu(record, stats),
+        },
+        {
+            title: 'Memory',
+            key: 'memory',
+            width: 100,
+            render: (_value: unknown, record: Container) => renderMemory(record, stats),
+        },
+    ];
+}
+
 function buildColumns(
     fetcher: DockerFetcherService,
     navigate: NavigateFunction,
     onMutated: () => void,
+    stats: ContainerStatsMap,
 ): NonNullable<TableProps<Container>['columns']> {
     const imageColumn: TableColumnType<Container> = {
         title: 'Image',
@@ -141,7 +196,11 @@ function buildColumns(
             />
         ),
     };
-    return [nameColumn, imageColumn].concat(staticColumns).concat([actionsColumn]);
+    return [nameColumn, imageColumn]
+        .concat(stateColumns)
+        .concat(statsColumns(stats))
+        .concat(trailingColumns)
+        .concat([actionsColumn]);
 }
 
 function describeLoadError(error: unknown): string {
@@ -155,15 +214,55 @@ function ContainerList(props: ContainerListProps): ReactElement {
     const navigate = useNavigate();
     const [showAll, setShowAll] = useState<boolean>(false);
 
-    /* Re-fetches (reload after a row action) are silent per the hook contract —
-       the existing rows stay rendered and the hovered row's toolbar does not
-       flash away. */
+    /* Re-fetches (reload after a row action, or the slow background poll) are
+       silent per the hook contract — the existing rows stay rendered and the
+       hovered row's toolbar does not flash away. */
     const fetched: FetchedData<Container[]> = useFetchedData<Container[]>({
         fetch: () => props.fetcher.getContainers(),
         describeError: describeLoadError,
         requestKey: 'containers',
         resetOnKeyChange: true,
+        pollIntervalMs: LIST_POLL_INTERVAL_MS,
     });
+
+    /* The CPU/Memory cells are telemetry with their own lifecycle, so like the
+       log panel they poll in a mount-scoped session instead of going through
+       useFetchedData. A failed poll keeps the last samples on screen and just
+       retries later — the dashes/values are decoration, never worth an alert. */
+    const [stats, setStats] = useState<ContainerStatsMap>({});
+    useEffect(() => {
+        let disposed: boolean = false;
+        let timer: number | undefined = undefined;
+
+        async function poll(): Promise<void> {
+            if (disposed) {
+                return;
+            }
+            let delay: number = STATS_POLL_INTERVAL_MS;
+            try {
+                const fresh: ContainerStatsMap = await props.fetcher.getContainersStats();
+                if (disposed) {
+                    return;
+                }
+                setStats(fresh);
+            } catch {
+                delay = STATS_POLL_ERROR_BACKOFF_MS;
+            }
+            if (disposed) {
+                return;
+            }
+            timer = window.setTimeout(poll, delay);
+        }
+
+        poll();
+
+        return () => {
+            disposed = true;
+            if (timer !== undefined) {
+                clearTimeout(timer);
+            }
+        };
+    }, [props.fetcher]);
 
     if (fetched.data === null && fetched.errorMessage !== null) {
         return (
@@ -197,7 +296,7 @@ function ContainerList(props: ContainerListProps): ReactElement {
         refreshAlert = null;
     }
 
-    const columns: NonNullable<TableProps<Container>['columns']> = buildColumns(props.fetcher, navigate, fetched.reload);
+    const columns: NonNullable<TableProps<Container>['columns']> = buildColumns(props.fetcher, navigate, fetched.reload, stats);
 
     let visibleContainers: Container[];
     if (showAll) {
