@@ -1,24 +1,26 @@
-import { CloudOutlined, DesktopOutlined } from '@ant-design/icons';
-import { Alert, Flex, Space, Switch, Table, Tag, Tooltip, Typography } from 'antd';
+import { Alert, Flex, Switch, Table, Tag, Tooltip, Typography } from 'antd';
 import type { TableColumnType, TableProps } from 'antd';
 import dayjs from 'dayjs';
 import relativeTime from 'dayjs/plugin/relativeTime';
-import { useEffect, useState } from 'react';
-import type { MouseEvent, ReactElement } from 'react';
-import { useNavigate } from 'react-router';
+import { useState } from 'react';
+import type { MouseEvent, ReactElement, ReactNode } from 'react';
+import { Link, useNavigate } from 'react-router';
 import type { NavigateFunction } from 'react-router';
 
 dayjs.extend(relativeTime);
 
 import { DockerFetcherError } from '../fetchers/docker-fetcher-error.ts';
 import type { DockerFetcherService } from '../fetchers/docker-fetcher-service.ts';
-import type { Container, ContainerState, ContainerStatsMap, PortBinding } from '../fetchers/interfaces.ts';
+import type { Container, ContainerStatsMap } from '../fetchers/interfaces.ts';
 import { useFetchedData } from '../hooks/use-fetched-data.ts';
+import { useContainerStats } from '../hooks/use-container-stats.ts';
 import type { FetchedData } from '../hooks/interfaces.ts';
-import { dedupePortBindings, formatCpuPercent, formatPorts, formatTimestamp, stateTagColor } from './container-format.ts';
+import { NO_STATS_TEXT, dedupePortBindings, formatCpuPercent, formatPorts, formatTimestamp, stateTagColor } from './container-format.ts';
 import ContainerRowActions from './container-row-actions.tsx';
 import { formatSizeBytes, shortImageId } from './image-format.ts';
 import type { ContainerListProps } from './interfaces.ts';
+import { navigateOnPlainClick } from './link-click.ts';
+import OriginBadge from './origin-badge.tsx';
 
 /** Label stamped on every container the platform creates; the default view filters on it. */
 const MANAGED_LABEL = 'cloudplatform.managed';
@@ -36,12 +38,6 @@ const BUILD_JOB_ID_LABEL = 'cloudplatform.build-job-id';
  * changes made outside the platform (docker CLI, a container exiting).
  */
 const LIST_POLL_INTERVAL_MS: number = 15000;
-/** Delay between successful stats polls. */
-const STATS_POLL_INTERVAL_MS: number = 3000;
-/** Delay before retrying after a failed stats poll. */
-const STATS_POLL_ERROR_BACKOFF_MS: number = 10000;
-/** Cell text for containers without a live sample — stopped, or not sampled yet. */
-const NO_STATS_TEXT: string = '—';
 
 function formatCreatedAt(createdAt: string): string {
     return dayjs(createdAt).fromNow();
@@ -54,41 +50,65 @@ function isManaged(container: Container): boolean {
 
 /** "Origin" cell: containers created through the platform get the cloud badge, the rest the device badge. */
 function renderOrigin(container: Container): ReactElement {
-    if (isManaged(container)) {
-        return (
-            <Space size={4}>
-                <CloudOutlined />
-                YCP
-            </Space>
-        );
+    return <OriginBadge managed={isManaged(container)} />;
+}
+
+/**
+ * Wraps a cell's content in the row's anchor to the container details page,
+ * stretched over the whole cell (.app-row-link swallows the cell padding), so
+ * the entire row surface is one continuous link. Cells with their own
+ * interactions (the platform-built image link, the action buttons) skip it.
+ * Only the Name cell's link is tabbable, so keyboard users get one stop per
+ * row instead of one per cell.
+ */
+function renderRowLinkCell(content: ReactNode, container: Container, tabbable: boolean): ReactElement {
+    let tabIndex: number;
+    if (tabbable) {
+        tabIndex = 0;
+    } else {
+        tabIndex = -1;
     }
+
+    /* Stopping propagation keeps a modified click (new tab) from also firing
+       the whole-row onClick fallback in the current tab. */
+    function handleClick(event: MouseEvent<HTMLElement>): void {
+        event.stopPropagation();
+    }
+
     return (
-        <Space size={4}>
-            <DesktopOutlined />
-            device
-        </Space>
+        <Link
+            to={`/services/${encodeURIComponent(container.name)}`}
+            className="app-row-link"
+            tabIndex={tabIndex}
+            draggable={false}
+            onClick={handleClick}
+        >
+            {content}
+        </Link>
     );
 }
 
 /**
  * "Image" cell: for containers whose image was platform-built (see
- * BUILD_JOB_ID_LABEL), a link opening the image details page; plain text
- * otherwise. Stopping the click keeps the whole-row navigation to container
- * details from also firing.
+ * BUILD_JOB_ID_LABEL), a link opening the image details page; otherwise the
+ * plain text joins the row link like any other cell. Stopping the click keeps
+ * the whole-row navigation to container details from also firing.
  */
 function renderImage(container: Container, navigate: NavigateFunction): ReactElement {
     if (container.labels[BUILD_JOB_ID_LABEL] === undefined) {
-        return <>{container.image}</>;
+        return renderRowLinkCell(container.image, container, false);
     }
+
+    /* The short id keeps the URL and breadcrumb readable; the daemon
+       resolves it like any id prefix. */
+    const path: string = `/images/${encodeURIComponent(shortImageId(container.imageId))}`;
 
     function handleClick(event: MouseEvent<HTMLElement>): void {
         event.stopPropagation();
-        /* The short id keeps the URL and breadcrumb readable; the daemon
-           resolves it like any id prefix. */
-        navigate(`/images/${encodeURIComponent(shortImageId(container.imageId))}`);
+        navigateOnPlainClick(event, navigate, path);
     }
 
-    return <Typography.Link onClick={handleClick}>{container.image}</Typography.Link>;
+    return <Typography.Link href={path} onClick={handleClick}>{container.image}</Typography.Link>;
 }
 
 /** "CPU" cell: live percentage where 100 is one full core; a dash without a sample. */
@@ -111,76 +131,80 @@ function renderMemory(container: Container, stats: ContainerStatsMap): ReactElem
     return <Tooltip title={`${used} of ${limit}`}>{used}</Tooltip>;
 }
 
-/* Width-less columns (Name, and Image in buildColumns) share the table's
-   remaining space under the fixed layout; the bounded columns hold their pixel
-   widths. Image lives in buildColumns because its cell navigates, CPU and
-   Memory in statsColumns because their cells read the live samples. */
-const nameColumn: TableColumnType<Container> = { title: 'Name', dataIndex: 'name', key: 'name', ellipsis: true };
-
-const stateColumns: NonNullable<TableProps<Container>['columns']> = [
-    {
-        title: 'Origin',
-        key: 'origin',
-        width: 100,
-        render: (_value: unknown, record: Container) => renderOrigin(record),
-    },
-    {
-        title: 'State',
-        dataIndex: 'state',
-        key: 'state',
-        width: 110,
-        render: (state: ContainerState) => <Tag color={stateTagColor(state)}>{state}</Tag>,
-    },
-    { title: 'Status', dataIndex: 'status', key: 'status', width: 180 },
-];
-
-const trailingColumns: NonNullable<TableProps<Container>['columns']> = [
-    {
-        title: 'Ports',
-        dataIndex: 'ports',
-        key: 'ports',
-        width: 150,
-        render: (ports: PortBinding[]) => formatPorts(dedupePortBindings(ports)),
-    },
-    {
-        title: 'Created',
-        dataIndex: 'createdAt',
-        key: 'createdAt',
-        width: 130,
-        render: (createdAt: string) => (
-            <Tooltip title={formatTimestamp(createdAt)}>{formatCreatedAt(createdAt)}</Tooltip>
-        ),
-    },
-];
-
-function statsColumns(stats: ContainerStatsMap): TableColumnType<Container>[] {
-    return [
-        {
-            title: 'CPU',
-            key: 'cpu',
-            width: 80,
-            render: (_value: unknown, record: Container) => renderCpu(record, stats),
-        },
-        {
-            title: 'Memory',
-            key: 'memory',
-            width: 100,
-            render: (_value: unknown, record: Container) => renderMemory(record, stats),
-        },
-    ];
-}
-
+/* Width-less columns (Name, Image) share the table's remaining space under
+   the fixed layout; the bounded columns hold their pixel widths. All data
+   cells render through renderRowLinkCell, so the columns live here rather
+   than at module level. */
 function buildColumns(
     fetcher: DockerFetcherService,
     navigate: NavigateFunction,
     onMutated: () => void,
     stats: ContainerStatsMap,
 ): NonNullable<TableProps<Container>['columns']> {
+    const nameColumn: TableColumnType<Container> = {
+        title: 'Name',
+        key: 'name',
+        ellipsis: true,
+        render: (_value: unknown, record: Container) => renderRowLinkCell(record.name, record, true),
+    };
     const imageColumn: TableColumnType<Container> = {
         title: 'Image',
         key: 'image',
         ellipsis: true,
         render: (_value: unknown, record: Container) => renderImage(record, navigate),
+    };
+    const originColumn: TableColumnType<Container> = {
+        title: 'Origin',
+        key: 'origin',
+        width: 100,
+        render: (_value: unknown, record: Container) =>
+            renderRowLinkCell(renderOrigin(record), record, false),
+    };
+    const stateColumn: TableColumnType<Container> = {
+        title: 'State',
+        key: 'state',
+        width: 110,
+        render: (_value: unknown, record: Container) =>
+            renderRowLinkCell(<Tag color={stateTagColor(record.state)}>{record.state}</Tag>, record, false),
+    };
+    const statusColumn: TableColumnType<Container> = {
+        title: 'Status',
+        key: 'status',
+        width: 180,
+        render: (_value: unknown, record: Container) =>
+            renderRowLinkCell(record.status, record, false),
+    };
+    const cpuColumn: TableColumnType<Container> = {
+        title: 'CPU',
+        key: 'cpu',
+        width: 80,
+        render: (_value: unknown, record: Container) =>
+            renderRowLinkCell(renderCpu(record, stats), record, false),
+    };
+    const memoryColumn: TableColumnType<Container> = {
+        title: 'Memory',
+        key: 'memory',
+        width: 100,
+        render: (_value: unknown, record: Container) =>
+            renderRowLinkCell(renderMemory(record, stats), record, false),
+    };
+    const portsColumn: TableColumnType<Container> = {
+        title: 'Ports',
+        key: 'ports',
+        width: 150,
+        render: (_value: unknown, record: Container) =>
+            renderRowLinkCell(formatPorts(dedupePortBindings(record.ports)), record, false),
+    };
+    const createdColumn: TableColumnType<Container> = {
+        title: 'Created',
+        key: 'createdAt',
+        width: 130,
+        render: (_value: unknown, record: Container) =>
+            renderRowLinkCell(
+                <Tooltip title={formatTimestamp(record.createdAt)}>{formatCreatedAt(record.createdAt)}</Tooltip>,
+                record,
+                false,
+            ),
     };
     const actionsColumn: TableColumnType<Container> = {
         title: '',
@@ -196,11 +220,18 @@ function buildColumns(
             />
         ),
     };
-    return [nameColumn, imageColumn]
-        .concat(stateColumns)
-        .concat(statsColumns(stats))
-        .concat(trailingColumns)
-        .concat([actionsColumn]);
+    return [
+        nameColumn,
+        imageColumn,
+        originColumn,
+        stateColumn,
+        statusColumn,
+        cpuColumn,
+        memoryColumn,
+        portsColumn,
+        createdColumn,
+        actionsColumn,
+    ];
 }
 
 function describeLoadError(error: unknown): string {
@@ -225,44 +256,9 @@ function ContainerList(props: ContainerListProps): ReactElement {
         pollIntervalMs: LIST_POLL_INTERVAL_MS,
     });
 
-    /* The CPU/Memory cells are telemetry with their own lifecycle, so like the
-       log panel they poll in a mount-scoped session instead of going through
-       useFetchedData. A failed poll keeps the last samples on screen and just
-       retries later — the dashes/values are decoration, never worth an alert. */
-    const [stats, setStats] = useState<ContainerStatsMap>({});
-    useEffect(() => {
-        let disposed: boolean = false;
-        let timer: number | undefined = undefined;
-
-        async function poll(): Promise<void> {
-            if (disposed) {
-                return;
-            }
-            let delay: number = STATS_POLL_INTERVAL_MS;
-            try {
-                const fresh: ContainerStatsMap = await props.fetcher.getContainersStats();
-                if (disposed) {
-                    return;
-                }
-                setStats(fresh);
-            } catch {
-                delay = STATS_POLL_ERROR_BACKOFF_MS;
-            }
-            if (disposed) {
-                return;
-            }
-            timer = window.setTimeout(poll, delay);
-        }
-
-        poll();
-
-        return () => {
-            disposed = true;
-            if (timer !== undefined) {
-                clearTimeout(timer);
-            }
-        };
-    }, [props.fetcher]);
+    /* The CPU/Memory cells read the live samples — see the hook for the
+       polling/backoff contract. */
+    const stats: ContainerStatsMap = useContainerStats(props.fetcher);
 
     if (fetched.data === null && fetched.errorMessage !== null) {
         return (

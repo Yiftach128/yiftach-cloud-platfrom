@@ -377,6 +377,9 @@ export interface StartBuildRequest {
     /** Public GitHub repository root URL, optionally with a "#branch-or-tag" fragment. */
     gitUrl: string;
     name: string;
+    /** Empty = the builder publishes the built image's TCP EXPOSEs itself
+        (host port = container port, bumped past taken ports; nothing when
+        the image EXPOSEs none). */
     ports: PortMappingRequest[];
     env: Record<string, string>;
     /**

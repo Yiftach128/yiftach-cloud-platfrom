@@ -17,14 +17,18 @@ import type {
     ContainerHostConfigDetails,
     ContainerMount,
     ContainerStateDetails,
+    ContainerStats,
+    ContainerStatsMap,
     NetworkAttachment,
     PortBinding,
 } from '../fetchers/interfaces.ts';
+import { useContainerStats } from '../hooks/use-container-stats.ts';
 import { useFetchedData } from '../hooks/use-fetched-data.ts';
 import type { FetchedData } from '../hooks/interfaces.ts';
 import ContainerControls from './container-controls.tsx';
 import ContainerLogsPanel from './container-logs-panel.tsx';
-import { formatTimestamp, stateTagColor } from './container-format.ts';
+import { NO_STATS_TEXT, formatCpuPercent, formatTimestamp, stateTagColor } from './container-format.ts';
+import { formatSizeBytes } from './image-format.ts';
 import type { ContainerDetailsProps } from './interfaces.ts';
 
 function formatRelative(iso: string): string {
@@ -116,6 +120,25 @@ function buildStateItems(state: ContainerStateDetails): NonNullable<Descriptions
         items.push({ key: 'error', label: 'Error', children: state.error });
     }
     return items;
+}
+
+/** "Resources" block: the live sample, or dashes while there is none — stopped, or not sampled yet. */
+function buildStatsItems(sample: ContainerStats | undefined): NonNullable<DescriptionsProps['items']> {
+    let cpuText: string;
+    let memoryText: string;
+    if (sample === undefined) {
+        cpuText = NO_STATS_TEXT;
+        memoryText = NO_STATS_TEXT;
+    } else {
+        cpuText = formatCpuPercent(sample.cpuPercent);
+        const used: string = formatSizeBytes(sample.memoryUsedBytes);
+        const limit: string = formatSizeBytes(sample.memoryLimitBytes);
+        memoryText = `${used} of ${limit}`;
+    }
+    return [
+        { key: 'cpu', label: 'CPU', children: cpuText },
+        { key: 'memory', label: 'Memory', children: memoryText },
+    ];
 }
 
 function buildHealthItems(health: ContainerHealth): NonNullable<DescriptionsProps['items']> {
@@ -277,6 +300,11 @@ function ContainerDetails(props: ContainerDetailsProps): ReactElement {
         resetOnKeyChange: true,
     });
 
+    /* Always polling, even while the container is stopped or details are still
+       loading: Start on this page's toolbar must surface samples within one
+       3s tick, and the batch call is cheap. */
+    const stats: ContainerStatsMap = useContainerStats(props.fetcher);
+
     function handleToggleLogs(): void {
         setLogsOpen((value: boolean) => !value);
     }
@@ -295,6 +323,9 @@ function ContainerDetails(props: ContainerDetailsProps): ReactElement {
         return <Skeleton active paragraph={{ rows: 8 }} />;
     }
     const details: ContainerDetailsData = fetched.data;
+    /* details.id is the full container id — the stats map's key (the Overview
+       block only truncates it for display). */
+    const sample: ContainerStats | undefined = stats[details.id];
 
     let refreshAlert: ReactElement | null;
     if (fetched.errorMessage !== null) {
@@ -320,6 +351,7 @@ function ContainerDetails(props: ContainerDetailsProps): ReactElement {
         <Flex vertical gap={24}>
             <Descriptions title="Overview" bordered size="small" column={2} items={buildOverviewItems(details)} />
             <Descriptions title="State" bordered size="small" column={2} items={buildStateItems(details.state)} />
+            <Descriptions title="Resources" bordered size="small" column={2} items={buildStatsItems(sample)} />
             {healthSection}
             <Descriptions title="Config" bordered size="small" column={2} items={buildConfigItems(details.config)} />
             <Descriptions title="Host config" bordered size="small" column={2} items={buildHostConfigItems(details.hostConfig)} />

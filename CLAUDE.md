@@ -83,7 +83,9 @@ error handler.
   Image *builds* do not happen in this process — they belong to the builder service.
 - `src/services/builds/` — the FIFO build queue the builder service works off:
   `POST /builds` enqueues (202, status `queued`; 429 past 10 waiting jobs) with the
-  whole container config riding along, plus an optional `imageName` ("name" or
+  whole container config riding along (an empty `ports` list means the builder
+  resolves published ports from the built image's TCP EXPOSEs after the build —
+  nothing published when it has none), plus an optional `imageName` ("name" or
   "name:tag") used as the image tag instead of the generated
   `cloudplatform/build-<owner>-<repo>:<shortid>`; clients poll `GET /builds/:id`. The builder
   claims the oldest queued job via `POST /builds-queue/claim` (204 when empty; the
@@ -110,8 +112,8 @@ error handler.
 A headless polling worker — no HTTP server, so no routes and no error handler; the
 backend code conventions apply. It runs alongside the platform via `npm start` today
 and is designed to run as a container later (its `Dockerfile` exists; a compose file
-is a future phase). One task at a time: claim → clone → build → create container →
-report, then poll again.
+is a future phase). One task at a time: claim → clone → build → resolve ports →
+create container → report, then poll again.
 
 - `src/main.ts` — entry point; `src/config.ts` — env-driven `Config`, logged at
   startup (`PLATFORM_API_URL`, `DOCKER_HOST`, `POLL_INTERVAL_MS`, `WORKSPACE_DIR`,
@@ -136,8 +138,12 @@ report, then poll again.
   copies of the platform's docker-folder logic (`drain-progress-stream.ts` exists in
   both packages **byte-identically** — no workspaces, so edits must touch both).
 - `src/services/worker/` — `BuildWorker` (the serial loop; always deletes the clone
-  workspace in `finally`) and `LogBatcher` (flushes log lines to the platform about
-  once a second; records a 404 instead of throwing from the timer).
+  workspace in `finally`), `LogBatcher` (flushes log lines to the platform about
+  once a second; records a 404 instead of throwing from the timer), and
+  `PortResolver` (when the job's container config carries no ports, resolves them
+  from the built image's TCP EXPOSEs via the platform API — host = container port
+  bumped past taken ports, the frontend `port-defaults.ts` policy; no TCP EXPOSE
+  publishes nothing).
 
 ## Frontend architecture
 
@@ -152,6 +158,22 @@ classes; JSX files use `.tsx`).
   `DockerFetcherError`, so axios never leaks into components. Wire types in
   `fetchers/interfaces.ts` mirror the platform backend's `interfaces.ts`, except
   JSON-serialized fields (backend `Date` → frontend ISO `string`).
+- **Route navigation renders a real anchor.** Anything the user clicks to go somewhere
+  — sidebar menu items, breadcrumb crumbs, table-cell links, navigation buttons, the
+  wizard's source cards, overview node cards — must be an `<a href>` so ctrl+click and
+  middle-click open a new tab: react-router `<Link>` where antd styles anchors in
+  context (Menu labels, Breadcrumb titles) or around card-like blocks (with
+  `color: 'inherit'`), and antd `Typography.Link`/`Button` with `href` plus an
+  `onClick` delegating to `components/link-click.ts`'s `navigateOnPlainClick` so a
+  plain left click stays an SPA navigation. Imperative `navigate()` is reserved for
+  post-action redirects (after a create/delete succeeds) and `<Navigate>` guards.
+  Table rows can't be anchors, so every data cell wraps its content in the row's
+  `<Link>` styled by `.app-row-link` (index.css), which swallows the cell padding so
+  the whole row surface is one continuous link that reads as plain text. Cells with
+  their own interactions (the platform-built image link, the action buttons) skip the
+  wrapper; only the primary cell's link is tabbable (the rest get `tabIndex={-1}`);
+  every cell link stops propagation, and the row keeps its whole-row `onClick` as the
+  fallback for the leftover surface.
 - **Skeletons only when there is nothing to show; re-fetches are silent.** A view renders
   a loading `Skeleton` only while it has no data yet — first load, or navigation to a
   *different* entity. Once content is on screen, re-fetches keep the stale content
@@ -164,13 +186,18 @@ classes; JSX files use `.tsx`).
   e.g. the new-container wizard keeps the current form while a newly picked image's
   prefill loads; `pollIntervalMs` adds a slow silent re-fetch cadence, e.g. the
   container table's row refresh). Polling that needs more than a cadence — cursors,
-  error backoff, accumulation (`container-logs-panel.tsx`, `build-progress-panel.tsx`,
-  the container table's stats loop) — keeps its own timeout loop instead, but follows
-  the same skeleton-per-session and inline-alert rules.
+  error backoff, accumulation (`container-logs-panel.tsx`, `build-progress-panel.tsx`)
+  — keeps its own timeout loop instead, but follows the same skeleton-per-session and
+  inline-alert rules. One such loop is shared: `src/hooks/use-container-stats.ts`
+  polls `GET /containers/stats` (success → 3s, silent failure → 10s backoff, no
+  alert) for the services table, the overview graph, and the container details
+  page's Resources block.
 - The GitHub source in the new-container wizard submits the build **and** the container
   config in one `POST /builds`; the builder service creates the container server-side,
   so the wizard only watches the job (`queued` → `running` → terminal) and navigates to
-  My Services when it succeeds. It never calls `POST /containers` for that source.
+  My Services when it succeeds. It never calls `POST /containers` for that source. Its
+  ports section starts with no rows — empty means the builder auto-publishes the built
+  image's EXPOSEd TCP ports (or nothing when it EXPOSEs none).
 - Clicking a My Images row opens `/images/:imageId` (short id in the URL — the daemon
   resolves it as an id prefix): `components/image-details.tsx`, fed by
   `GET /api/v1/images/:id`, showing the basics, the EXPOSEd ports, and the builder's
@@ -178,6 +205,20 @@ classes; JSX files use `.tsx`).
   create-from-image deep link (`?image=`) uses the same endpoint to pre-fill the
   ports rows from the image's TCP EXPOSEs (host port = container port, like presets;
   best-effort — a failed lookup just leaves the default empty row).
+- The Overview page (`/overview`) draws the deployment topology with ReactFlow
+  (`@xyflow/react`): GitHub repo → image → container, one column each.
+  `components/overview-graph-builder.ts` is the pure assembly + layout step — stable
+  node ids and deterministic hand-rolled positions (no layout library), with registry
+  images absent from `GET /images` synthesized from the container rows.
+  `overview-graph.tsx` polls both lists via `use-fetched-data` (15s) plus the shared
+  `use-container-stats` 3s loop, overlaying samples without touching
+  positions so the pan/zoom viewport never resets. Node cards are real links
+  (container → `/services/:name`, managed image → `/images/:id`, repo → GitHub in a
+  new tab), kept clickable by the canvas's no-op `onNodeClick` — xyflow strips
+  pointer events from nodes with no interaction props, so removing that handler
+  makes every node card inert; the managed-only Switch matches the services table. The custom node cards
+  style themselves inline (square, grey) — ReactFlow is not antd, so its control
+  chrome is squared in `index.css`, not via tokens.
 - The dev server proxies `/api` → `http://127.0.0.1:3000` (`vite.config.ts`); the backend
   deliberately has no CORS middleware, so never call the backend origin directly.
 - App-wide look and feel is set via antd `ConfigProvider` theme tokens in `main.tsx` —

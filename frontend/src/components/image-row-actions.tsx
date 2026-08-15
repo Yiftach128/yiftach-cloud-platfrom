@@ -6,6 +6,7 @@ import { useNavigate } from 'react-router';
 
 import { toErrorText } from './container-format.ts';
 import type { ImageRowActionsProps } from './interfaces.ts';
+import { navigateOnPlainClick } from './link-click.ts';
 
 /**
  * Hover-revealed action pair for one image-list row: create a container from
@@ -21,12 +22,21 @@ function ImageRowActions(props: ImageRowActionsProps): ReactElement {
     const [confirmOpen, setConfirmOpen] = useState<boolean>(false);
 
     /* Deep-links into the new-container wizard's image step; the wizard reads
-       the ?image= param and prefills the Image reference field. */
-    function handleCreateContainer(): void {
-        if (props.primaryTag === null) {
+       the ?image= param and prefills the Image reference field. The href makes
+       the button a real anchor (new-tab friendly); antd drops it while the
+       button is disabled. */
+    let createHref: string | undefined;
+    if (props.primaryTag === null) {
+        createHref = undefined;
+    } else {
+        createHref = `/containers/new/image?image=${encodeURIComponent(props.primaryTag)}`;
+    }
+
+    function handleCreateContainer(event: MouseEvent<HTMLElement>): void {
+        if (createHref === undefined) {
             return; // unreachable: the button is disabled for dangling images
         }
-        navigate(`/containers/new/image?image=${encodeURIComponent(props.primaryTag)}`);
+        navigateOnPlainClick(event, navigate, createHref);
     }
 
     /* Returning the promise keeps the Popconfirm open with its OK button
@@ -80,6 +90,7 @@ function ImageRowActions(props: ImageRowActionsProps): ReactElement {
                     size="small"
                     aria-label="Create container"
                     icon={<PlayCircleOutlined />}
+                    href={createHref}
                     disabled={props.primaryTag === null || deleting}
                     onClick={handleCreateContainer}
                 />

@@ -1,11 +1,12 @@
 import { DeleteOutlined, PlayCircleOutlined } from '@ant-design/icons';
 import { App as AntdApp, Button, Flex, Popconfirm, Tooltip } from 'antd';
 import { useState } from 'react';
-import type { ReactElement } from 'react';
+import type { MouseEvent, ReactElement } from 'react';
 import { useNavigate } from 'react-router';
 
 import { toErrorText } from './container-format.ts';
 import type { ImageControlsProps } from './interfaces.ts';
+import { navigateOnPlainClick } from './link-click.ts';
 
 /**
  * Toolbar for the image details page: create a container from the image, or
@@ -18,12 +19,21 @@ function ImageControls(props: ImageControlsProps): ReactElement {
     const [deleting, setDeleting] = useState<boolean>(false);
 
     /* Deep-links into the new-container wizard's image step; the wizard reads
-       the ?image= param and prefills the Image reference field. */
-    function handleCreateContainer(): void {
-        if (props.primaryTag === null) {
+       the ?image= param and prefills the Image reference field. The href makes
+       the button a real anchor (new-tab friendly); antd drops it while the
+       button is disabled. */
+    let createHref: string | undefined;
+    if (props.primaryTag === null) {
+        createHref = undefined;
+    } else {
+        createHref = `/containers/new/image?image=${encodeURIComponent(props.primaryTag)}`;
+    }
+
+    function handleCreateContainer(event: MouseEvent<HTMLElement>): void {
+        if (createHref === undefined) {
             return; // unreachable: the button is disabled for dangling images
         }
-        navigate(`/containers/new/image?image=${encodeURIComponent(props.primaryTag)}`);
+        navigateOnPlainClick(event, navigate, createHref);
     }
 
     /* Success navigates away and unmounts this component, so there is no
@@ -54,6 +64,7 @@ function ImageControls(props: ImageControlsProps): ReactElement {
             <Tooltip title={createTooltip}>
                 <Button
                     icon={<PlayCircleOutlined />}
+                    href={createHref}
                     disabled={props.primaryTag === null || deleting}
                     onClick={handleCreateContainer}
                 >

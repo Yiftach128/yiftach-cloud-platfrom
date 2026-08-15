@@ -1,13 +1,10 @@
-import { Result } from 'antd';
 import type { ReactElement } from 'react';
 
-function OverviewPage(): ReactElement {
-    return (
-        <Result
-            status="info"
-            subTitle="The overview dashboard is coming soon."
-        />
-    );
+import OverviewGraph from '../components/overview-graph.tsx';
+import type { OverviewPageProps } from './interfaces.ts';
+
+function OverviewPage(props: OverviewPageProps): ReactElement {
+    return <OverviewGraph fetcher={props.fetcher} />;
 }
 
 export default OverviewPage;

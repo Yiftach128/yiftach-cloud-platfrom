@@ -85,6 +85,60 @@ export interface ImageRowActionsProps {
     onMutated: () => void;
 }
 
+export interface OriginBadgeProps {
+    /** True when the container carries the platform's managed label — YCP badge; device badge otherwise. */
+    managed: boolean;
+}
+
+export interface OverviewGraphProps {
+    fetcher: DockerFetcherService;
+}
+
+/*
+ * The overview node payloads are type aliases, not interfaces, on purpose:
+ * @xyflow/react's Node<TData> constrains TData to Record<string, unknown>,
+ * which interfaces never satisfy (declaration merging denies them the
+ * implicit index signature). The payloads themselves stay library-free; the
+ * ReactFlow-typed node unions live in overview-graph-builder.ts.
+ */
+
+/** Payload of one GitHub source node on the overview graph. */
+export type OverviewRepoNodeData = {
+    /** cloudplatform.repo-url label value; the dedup key and click target. */
+    repoUrl: string;
+    /** "owner/repo" when the URL parses as GitHub; the raw URL otherwise. */
+    displayName: string;
+};
+
+/** Payload of one image node on the overview graph. */
+export type OverviewImageNodeData = {
+    /** Full sha256 id — the join key with Container.imageId. */
+    imageId: string;
+    /** First tag for managed images; the container's reference for synthesized registry nodes. */
+    reference: string;
+    /** Human-readable size; null on synthesized nodes (the managed list doesn't know them). */
+    sizeText: string | null;
+    /** True when backed by a managed-images row — enables the image-details click. */
+    managed: boolean;
+};
+
+/** Payload of one container node on the overview graph. */
+export type OverviewContainerNodeData = {
+    /** Full container id — the ContainerStatsMap key. */
+    containerId: string;
+    /** Primary name; the container-details click target. */
+    containerName: string;
+    state: ContainerState;
+    /** True for platform-created containers — drives the YCP/device origin badge. */
+    managed: boolean;
+    /** Preformatted "8080→80/tcp, ..." line; empty string hides it. */
+    portsText: string;
+    /** Preformatted live sample text; null without one (stopped, or not sampled yet). */
+    cpuText: string | null;
+    /** Preformatted live sample text; null without one (stopped, or not sampled yet). */
+    memoryText: string | null;
+};
+
 /** Where a new container's image comes from; drives which source field the config form shows. */
 export type ContainerSourceKind = 'preset' | 'image' | 'github';
 
@@ -99,17 +153,19 @@ export interface PresetSelectProps {
     onSelect: (preset: ImagePreset) => void;
 }
 
+export interface PresetIconProps {
+    /** Preset `name` from the backend catalog; selects `/icons/<name>.svg`. */
+    name: string;
+}
+
 /** Static content of one source card on the wizard's first screen. */
 export interface SourceCardDescriptor {
     kind: ContainerSourceKind;
+    /** URL step segment under /containers/new/ — must match the wizard's SEGMENT_TO_KIND table. */
+    segment: string;
     icon: ReactElement;
     title: string;
     description: string;
-}
-
-export interface SourceKindSelectProps {
-    /** Called with the chosen source kind when its card is clicked. */
-    onSelect: (kind: ContainerSourceKind) => void;
 }
 
 /** One row of the ports list; a side is unset while the user is still typing. */

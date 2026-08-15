@@ -14,6 +14,8 @@ export interface PortMapping {
 /** The container the user asked for at build submission, created after the build. */
 export interface BuildContainerConfig {
     name: string;
+    /** Empty means the builder resolves them from the built image's TCP
+        EXPOSEs after the build (nothing is published when it has none). */
     ports: PortMapping[];
     env: Record<string, string>;
 }
@@ -42,4 +44,29 @@ export interface CreateContainerRequest {
     image: string;
     ports: PortMapping[];
     env: Record<string, string>;
+}
+
+/** One container port an image EXPOSEs, from GET /images/:ref/exposed-ports
+    (mirrors ImageExposedPort). */
+export interface ImageExposedPort {
+    port: number;
+    /** "tcp", "udp" or "sctp". */
+    protocol: string;
+}
+
+/** One port binding of a listed container; only what the builder reads. */
+export interface ContainerPortBinding {
+    privatePort: number;
+    /** Host port, present only while the port is actually published. */
+    publicPort?: number;
+    type: string;
+}
+
+/**
+ * Deliberately partial mirror of one GET /containers entry — the builder only
+ * reads the published ports, to build the taken-host-port set during port
+ * resolution.
+ */
+export interface ContainerSummary {
+    ports: ContainerPortBinding[];
 }

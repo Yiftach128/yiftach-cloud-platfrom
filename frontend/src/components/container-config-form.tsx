@@ -251,6 +251,22 @@ function ContainerConfigForm(props: ContainerConfigFormProps): ReactElement {
         sourceField = null;
     }
 
+    /* Only the GitHub step gets the hint — the builder resolves an empty
+       list from the built image's EXPOSEs; image/preset flows prefill their
+       rows client-side instead. */
+    let portsHint: ReactElement | null;
+    if (props.sourceKind === 'github') {
+        portsHint = (
+            <Typography.Text type="secondary" style={{ display: 'block', marginTop: 4 }}>
+                Optional — leave empty to publish the image&apos;s exposed TCP ports
+                automatically after the build; an image that exposes none starts with
+                nothing published.
+            </Typography.Text>
+        );
+    } else {
+        portsHint = null;
+    }
+
     let presetEnvItems: ReactElement | null;
     if (props.presetEnvVars !== undefined && props.presetEnvVars.length > 0) {
         presetEnvItems = (
@@ -318,6 +334,7 @@ function ContainerConfigForm(props: ContainerConfigFormProps): ReactElement {
             {sourceField}
 
             <Typography.Text strong>Published ports</Typography.Text>
+            {portsHint}
             <Form.List name="ports">
                 {(fields, operations) => (
                     <Flex vertical gap={8} style={{ marginTop: 8, marginBottom: 16 }}>

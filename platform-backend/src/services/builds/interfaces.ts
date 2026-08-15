@@ -36,6 +36,8 @@ export interface BuildJob {
 /** The container the user asked for at submission; created by the builder after the build. */
 export interface BuildContainerConfig {
     name: string;
+    /** Empty means the builder resolves published ports from the built
+        image's TCP EXPOSEs (nothing is published when it has none). */
     ports: PortMapping[];
     env: Record<string, string>;
 }

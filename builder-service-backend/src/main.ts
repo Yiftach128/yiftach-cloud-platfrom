@@ -15,6 +15,7 @@ import { ImageBuilderService } from './services/docker/image-builder-service.ts'
 import { GitCloneService } from './services/git/git-clone-service.ts';
 import { PlatformApiClient } from './services/platform/platform-api-client.ts';
 import { BuildWorker } from './services/worker/build-worker.ts';
+import { PortResolver } from './services/worker/port-resolver.ts';
 
 // Load builder-service-backend/.env (sits next to package.json) if present.
 const envFile: string = fileURLToPath(new URL('../.env', import.meta.url));
@@ -31,7 +32,8 @@ const images = new ImageBuilderService({
     host: config.dockerHostName,
     port: config.dockerHostPort,
 });
-const worker = new BuildWorker(platform, git, images, {
+const portResolver = new PortResolver(platform);
+const worker = new BuildWorker(platform, git, images, portResolver, {
     pollIntervalMs: config.pollIntervalMs,
     workspaceDir: config.workspaceDir,
     gitCloneTimeoutMs: config.gitCloneTimeoutMs,

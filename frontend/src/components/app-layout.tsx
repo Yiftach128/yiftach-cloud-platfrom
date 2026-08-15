@@ -2,7 +2,7 @@ import { CloudOutlined, CloudServerOutlined, CodeSandboxOutlined, DashboardOutli
 import { Divider, Layout, Menu } from 'antd';
 import type { MenuProps } from 'antd';
 import type { ReactElement } from 'react';
-import { Outlet, useLocation, useNavigate } from 'react-router';
+import { Link, Outlet, useLocation } from 'react-router';
 
 import HeaderBreadcrumb from './header-breadcrumb.tsx';
 import type { NavItem } from './interfaces.ts';
@@ -19,6 +19,7 @@ const dividerColor: string = '#d9d9d9';
 /* Single source of truth for navigation: drives the sider menu, the selected-item
    derivation, and the header breadcrumb roots. Paths double as menu keys. */
 const navItems: NavItem[] = [
+    { path: '/overview', icon: <DashboardOutlined />, label: 'Overview' },
     { path: '/services', icon: <CloudServerOutlined />, label: 'My Services' },
     {
         path: '/containers/new',
@@ -27,13 +28,15 @@ const navItems: NavItem[] = [
         childLabels: { database: 'Managed Service', image: 'Docker Image', github: 'GitHub Repository' },
     },
     { path: '/images', icon: <CodeSandboxOutlined />, label: 'My Images' },
-    { path: '/overview', icon: <DashboardOutlined />, label: 'Overview' },
 ];
 
+/* The Link makes each item a real anchor (new-tab friendly); antd's menu CSS
+   stretches an in-item anchor over the whole row, icon included, so no
+   Menu-level onClick is needed. */
 const menuItems: MenuProps['items'] = navItems.map((item: NavItem) => ({
     key: item.path,
     icon: item.icon,
-    label: item.label,
+    label: <Link to={item.path}>{item.label}</Link>,
 }));
 
 /* Child routes (e.g. /services/<container>) keep their nav root highlighted. Exact
@@ -54,13 +57,8 @@ function deriveSelectedMenuKey(pathname: string, items: NavItem[]): string {
 
 function AppLayout(): ReactElement {
     const location = useLocation();
-    const navigate = useNavigate();
 
     const selectedMenuKey: string = deriveSelectedMenuKey(location.pathname, navItems);
-
-    function handleMenuClick(info: { key: string }): void {
-        navigate(info.key);
-    }
 
     return (
         <Layout style={{ minHeight: '100vh' }}>
@@ -72,7 +70,6 @@ function AppLayout(): ReactElement {
                     mode="inline"
                     selectedKeys={[selectedMenuKey]}
                     items={menuItems}
-                    onClick={handleMenuClick}
                     style={{ background: 'transparent', borderInlineEnd: 'none' }}
                 />
             </Layout.Sider>

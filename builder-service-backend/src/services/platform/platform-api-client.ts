@@ -13,7 +13,9 @@ import { BuildJobLostError } from './build-job-lost-error.ts';
 import type {
     BuildResultReport,
     BuildTask,
+    ContainerSummary,
     CreateContainerRequest,
+    ImageExposedPort,
 } from './interfaces.ts';
 import { PlatformApiError } from './platform-api-error.ts';
 
@@ -70,6 +72,35 @@ export class PlatformApiClient {
     public async createContainer(request: CreateContainerRequest): Promise<void> {
         try {
             await this.http.post('/containers', request);
+        } catch (error) {
+            throw this.toApiError(error);
+        }
+    }
+
+    /**
+     * The ports a locally present image EXPOSEs, by id or reference. Built
+     * tags carry "/" and ":" (cloudplatform/build-owner-repo:shortid), so the
+     * reference is URL-encoded. Not a job-scoped call: a 404 (image not
+     * local) right after a build is abnormal — likely the builder and the
+     * platform point at different daemons — and surfaces as a plain
+     * {@link PlatformApiError} that fails the build loudly.
+     */
+    public async getImageExposedPorts(reference: string): Promise<ImageExposedPort[]> {
+        try {
+            const encoded: string = encodeURIComponent(reference);
+            const response: AxiosResponse<ImageExposedPort[]> =
+                await this.http.get(`/images/${encoded}/exposed-ports`);
+            return response.data;
+        } catch (error) {
+            throw this.toApiError(error);
+        }
+    }
+
+    /** The daemon's container list; feeds the taken-host-port set during port resolution. */
+    public async getContainers(): Promise<ContainerSummary[]> {
+        try {
+            const response: AxiosResponse<ContainerSummary[]> = await this.http.get('/containers');
+            return response.data;
         } catch (error) {
             throw this.toApiError(error);
         }

@@ -40,16 +40,6 @@ textarea,
     gap: 8px;
 }
 
-/* Clickable ancestor crumb in the header breadcrumb (renders as a span, not an <a>,
-   so it gets no link affordance from antd). */
-.app-breadcrumb-link {
-    cursor: pointer;
-}
-
-.app-breadcrumb-link:hover {
-    color: rgba(0, 0, 0, 0.88);
-}
-
 .app-sider-menu .ant-menu-item {
     position: relative;
 }
@@ -66,6 +56,58 @@ textarea,
     height: 60%;
     border-radius: 2px;
     background-color: #8c8c8c;
+}
+
+/* Overview topology (ReactFlow, not antd — the "prefer tokens" rule doesn't
+   reach it): square the library's control chrome to match the theme. The node
+   cards style themselves inline; only their hover affordance needs CSS. */
+.react-flow__controls {
+    box-shadow: none;
+    border: 1px solid #d9d9d9;
+}
+
+.react-flow__controls-button {
+    border-radius: 0;
+}
+
+.app-overview-node-clickable:hover {
+    border-color: #8c8c8c;
+}
+
+/* Whole-row link cells (services and images tables): the anchor swallows the
+   cell's 16px padding so the entire row surface is one continuous link to the
+   row's details page; cells with their own interactions (the platform-built
+   image link, the action buttons) skip the wrapper and keep the row-level
+   onClick as their fallback. Inherited color keeps the cells reading as plain
+   text; the overflow rules keep antd's cell ellipsis working. The height pair
+   below makes the anchor track the cell's full height even when a taller
+   sibling cell stretches the row (the 1px is a minimum that lets the
+   percentage resolve); align-content re-centers the content vertically. */
+.ant-table-cell:has(> .app-row-link) {
+    height: 1px;
+}
+
+.app-row-link {
+    display: block;
+    box-sizing: border-box;
+    height: calc(100% + 32px);
+    margin: -16px;
+    padding: 16px;
+    align-content: center;
+    color: inherit;
+    text-decoration: none;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* antd styles anchors inside its components (.ant-table a:hover, higher
+   specificity than .app-row-link), which would tint the values blue on hover;
+   the row's grey hover background is the only intended hover feedback. Cells
+   with their own real link (the platform-built image) keep antd's link blue —
+   this pins only the whole-row wrapper. */
+.ant-table-cell a.app-row-link:hover,
+.ant-table-cell a.app-row-link:active {
+    color: inherit;
 }
 
 /* Row actions in the services and images tables: invisible (but

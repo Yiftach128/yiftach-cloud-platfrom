@@ -6,6 +6,7 @@ import type { ImagePreset } from '../fetchers/interfaces.ts';
 import { useFetchedData } from '../hooks/use-fetched-data.ts';
 import type { FetchedData } from '../hooks/interfaces.ts';
 import type { PresetSelectProps } from './interfaces.ts';
+import PresetIcon from './preset-icon.tsx';
 
 /** Matches the theme's grey primary; drawn as a stronger border on the selected card. */
 const SELECTED_BORDER = '2px solid #595959';
@@ -56,10 +57,13 @@ function PresetSelect(props: PresetSelectProps): ReactElement {
                         onClick={() => props.onSelect(preset)}
                         style={{ width: 260, border: border }}
                     >
-                        <Flex vertical gap={4}>
-                            <Typography.Text strong>{preset.displayName}</Typography.Text>
-                            <Typography.Text type="secondary">{preset.description}</Typography.Text>
-                            <Typography.Text code>{preset.image}</Typography.Text>
+                        <Flex vertical gap={8}>
+                            <PresetIcon name={preset.name} />
+                            <Flex vertical gap={4}>
+                                <Typography.Text strong>{preset.displayName}</Typography.Text>
+                                <Typography.Text type="secondary">{preset.description}</Typography.Text>
+                                <Typography.Text code>{preset.image}</Typography.Text>
+                            </Flex>
                         </Flex>
                     </Card>
                 );

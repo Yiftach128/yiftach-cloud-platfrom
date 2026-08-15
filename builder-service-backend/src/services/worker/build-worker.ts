@@ -1,7 +1,8 @@
 /**
- * The builder's main loop: claim → clone → build → create container → report,
- * strictly one task at a time (the platform's queue is serial by design). The
- * clone workspace is ALWAYS deleted afterwards — success, failure, or abandon.
+ * The builder's main loop: claim → clone → build → resolve ports (when the
+ * config carries none) → create container → report, strictly one task at a
+ * time (the platform's queue is serial by design). The clone workspace is
+ * ALWAYS deleted afterwards — success, failure, or abandon.
  *
  * Failure routing: a lost job (404) is abandoned quietly; everything else is
  * flushed to the job log and reported as a failed result so the user sees the
@@ -16,10 +17,11 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import { ImageBuilderService } from '../docker/image-builder-service.ts';
 import { GitCloneService } from '../git/git-clone-service.ts';
 import { BuildJobLostError } from '../platform/build-job-lost-error.ts';
-import type { BuildTask } from '../platform/interfaces.ts';
+import type { BuildTask, PortMapping } from '../platform/interfaces.ts';
 import { PlatformApiClient } from '../platform/platform-api-client.ts';
 import type { BuildWorkerOptions } from './interfaces.ts';
 import { LogBatcher } from './log-batcher.ts';
+import { PortResolver } from './port-resolver.ts';
 
 /**
  * Provenance labels stamped on every built image, next to the managed label.
@@ -36,6 +38,7 @@ export class BuildWorker {
     private readonly platform: PlatformApiClient;
     private readonly git: GitCloneService;
     private readonly images: ImageBuilderService;
+    private readonly portResolver: PortResolver;
     private readonly options: BuildWorkerOptions;
     private stopRequested = false;
 
@@ -43,11 +46,13 @@ export class BuildWorker {
         platform: PlatformApiClient,
         git: GitCloneService,
         images: ImageBuilderService,
+        portResolver: PortResolver,
         options: BuildWorkerOptions,
     ) {
         this.platform = platform;
         this.git = git;
         this.images = images;
+        this.portResolver = portResolver;
         this.options = options;
     }
 
@@ -107,11 +112,23 @@ export class BuildWorker {
             });
             this.throwIfJobLost(task, batcher);
 
+            let ports: PortMapping[];
+            if (task.container.ports.length === 0) {
+                batcher.push("No ports were specified — resolving from the image's exposed ports ...");
+                ports = await this.portResolver.resolvePorts(
+                    task.imageTag,
+                    (line: string) => batcher.push(line),
+                );
+                this.throwIfJobLost(task, batcher);
+            } else {
+                ports = task.container.ports;
+            }
+
             batcher.push(`Creating container "${task.container.name}" ...`);
             await this.platform.createContainer({
                 name: task.container.name,
                 image: task.imageTag,
-                ports: task.container.ports,
+                ports: ports,
                 env: task.container.env,
             });
 

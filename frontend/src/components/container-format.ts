@@ -56,6 +56,9 @@ export function formatTimestamp(iso: string): string {
     return dayjs(iso).format('YYYY-MM-DD HH:mm:ss');
 }
 
+/** Stats text for containers without a live sample — stopped, or not sampled yet. */
+export const NO_STATS_TEXT: string = '—';
+
 /** "CPU" cell text, e.g. "3.4%" — the `docker stats` percentage, where 100 is one full core. */
 export function formatCpuPercent(cpuPercent: number): string {
     return `${cpuPercent.toFixed(1)}%`;

@@ -1,15 +1,13 @@
 import { Breadcrumb } from 'antd';
 import type { BreadcrumbProps } from 'antd';
 import type { ReactElement } from 'react';
-import { useLocation, useNavigate } from 'react-router';
-import type { NavigateFunction } from 'react-router';
+import { Link, useLocation } from 'react-router';
 
 import type { HeaderBreadcrumbProps, NavItem } from './interfaces.ts';
 
 function buildBreadcrumbItems(
     pathname: string,
     navItems: NavItem[],
-    navigate: NavigateFunction,
 ): NonNullable<BreadcrumbProps['items']> {
     /* Exact match: the page is a nav root, one plain crumb. */
     for (const item of navItems) {
@@ -30,14 +28,10 @@ function buildBreadcrumbItems(
                     leafTitle = mapped;
                 }
             }
+            /* A real anchor so the root crumb is new-tab friendly; antd styles
+               anchors inside breadcrumb items itself. */
             return [
-                {
-                    title: item.label,
-                    className: 'app-breadcrumb-link',
-                    onClick: (): void => {
-                        navigate(item.path);
-                    },
-                },
+                { title: <Link to={item.path}>{item.label}</Link> },
                 { title: leafTitle, style: { fontWeight: 600 } },
             ];
         }
@@ -48,10 +42,9 @@ function buildBreadcrumbItems(
 
 function HeaderBreadcrumb(props: HeaderBreadcrumbProps): ReactElement {
     const location = useLocation();
-    const navigate = useNavigate();
 
     const items: NonNullable<BreadcrumbProps['items']> =
-        buildBreadcrumbItems(location.pathname, props.navItems, navigate);
+        buildBreadcrumbItems(location.pathname, props.navItems);
     if (items.length === 0) {
         return <></>;
     }

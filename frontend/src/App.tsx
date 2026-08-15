@@ -23,7 +23,7 @@ function App(): ReactElement {
                     <Route path="/containers/new/:source?" element={<NewContainerPage fetcher={dockerFetcher} />} />
                     <Route path="/images" element={<ImagesPage fetcher={dockerFetcher} />} />
                     <Route path="/images/:imageId" element={<ImageDetailsPage fetcher={dockerFetcher} />} />
-                    <Route path="/overview" element={<OverviewPage />} />
+                    <Route path="/overview" element={<OverviewPage fetcher={dockerFetcher} />} />
                     <Route path="*" element={<Navigate to="/services" replace />} />
                 </Route>
             </Routes>

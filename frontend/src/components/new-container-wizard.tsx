@@ -34,25 +34,29 @@ import { buildLockedPortRows, collectTakenHostPorts } from './port-defaults.ts';
 import PresetSelect from './preset-select.tsx';
 import SourceKindSelect from './source-kind-select.tsx';
 
-/** Source kind by its URL step segment (/containers/new/<segment>), and the inverse. */
+/** Source kind by its URL step segment (/containers/new/<segment>); the
+    inverse mapping lives in the source cards (source-kind-select.tsx). */
 const SEGMENT_TO_KIND: Record<string, ContainerSourceKind> = {
     database: 'preset',
     image: 'image',
     github: 'github',
 };
 
-const KIND_TO_SEGMENT: Record<ContainerSourceKind, string> = {
-    preset: 'database',
-    image: 'image',
-    github: 'github',
-};
-
 function buildInitialValues(
+    sourceKind: ContainerSourceKind,
     preset: ImagePreset | null,
     taken: TakenResources,
 ): ContainerConfigFormValues {
     if (preset === null) {
-        return { name: '', ports: [{ locked: false }], extraEnv: [] };
+        /* The GitHub step starts portless — an empty list tells the builder
+           to publish the built image's TCP EXPOSEs itself. */
+        let ports: PortRowValue[];
+        if (sourceKind === 'github') {
+            ports = [];
+        } else {
+            ports = [{ locked: false }];
+        }
+        return { name: '', ports: ports, extraEnv: [] };
     }
 
     const presetEnv: Record<string, string> = {};
@@ -366,12 +370,7 @@ function NewContainerWizard(props: NewContainerWizardProps): ReactElement {
     }
 
     if (sourceKind === null) {
-        return (
-            <SourceKindSelect
-                onSelect={(kind: ContainerSourceKind) =>
-                    navigate(`/containers/new/${KIND_TO_SEGMENT[kind]}`)}
-            />
-        );
+        return <SourceKindSelect />;
     }
 
     /* Only the GitHub step shows the running build; navigating to another step
@@ -454,7 +453,7 @@ function NewContainerWizard(props: NewContainerWizardProps): ReactElement {
         if (sourceKind === 'github' && savedValues !== null) {
             initialValues = savedValues; // restore what the build was started with
         } else {
-            initialValues = buildInitialValues(initialPreset, takenResources);
+            initialValues = buildInitialValues(sourceKind, initialPreset, takenResources);
             if (appliedImage !== null) {
                 initialValues.image = appliedImage;
                 /* An empty suggestion (tag sanitized to nothing) just leaves

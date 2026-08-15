@@ -1,9 +1,9 @@
 import { Alert, Flex, Table, Tag, Tooltip, Typography } from 'antd';
-import type { TableProps } from 'antd';
+import type { TableColumnType, TableProps } from 'antd';
 import dayjs from 'dayjs';
 import relativeTime from 'dayjs/plugin/relativeTime';
-import type { ReactElement } from 'react';
-import { useNavigate } from 'react-router';
+import type { MouseEvent, ReactElement, ReactNode } from 'react';
+import { Link, useNavigate } from 'react-router';
 
 dayjs.extend(relativeTime);
 
@@ -16,6 +16,10 @@ import { formatTimestamp } from './container-format.ts';
 import { formatSizeBytes, shortImageId } from './image-format.ts';
 import ImageRowActions from './image-row-actions.tsx';
 import type { ImageListProps } from './interfaces.ts';
+import { navigateOnPlainClick } from './link-click.ts';
+
+/** The wizard step the empty-state hint links to. */
+const GITHUB_WIZARD_PATH: string = '/containers/new/github';
 
 function formatCreatedAt(createdAt: string): string {
     return dayjs(createdAt).fromNow();
@@ -40,71 +44,111 @@ function renderTags(tags: string[]): ReactElement {
     );
 }
 
-/* The width-less Tags column takes the table's remaining space under the fixed
-   layout; the bounded columns hold their pixel widths. No ellipsis on Tags —
-   chips wrap onto extra lines instead of being clipped. */
-const staticColumns: NonNullable<TableProps<ImageSummary>['columns']> = [
-    {
+/**
+ * Wraps a cell's content in the row's anchor to the image details page,
+ * stretched over the whole cell (.app-row-link swallows the cell padding), so
+ * the entire row surface is one continuous link. The action buttons' cell
+ * skips it. Only the Image ID cell's link is tabbable, so keyboard users get
+ * one stop per row instead of one per cell. The short id keeps the URL and
+ * breadcrumb readable; the daemon resolves it like any id prefix.
+ */
+function renderRowLinkCell(content: ReactNode, image: ImageSummary, tabbable: boolean): ReactElement {
+    let tabIndex: number;
+    if (tabbable) {
+        tabIndex = 0;
+    } else {
+        tabIndex = -1;
+    }
+
+    /* Stopping propagation keeps a modified click (new tab) from also firing
+       the whole-row onClick fallback in the current tab. */
+    function handleClick(event: MouseEvent<HTMLElement>): void {
+        event.stopPropagation();
+    }
+
+    return (
+        <Link
+            to={`/images/${encodeURIComponent(shortImageId(image.id))}`}
+            className="app-row-link"
+            tabIndex={tabIndex}
+            draggable={false}
+            onClick={handleClick}
+        >
+            {content}
+        </Link>
+    );
+}
+
+/* The width-less Tags column takes the table's remaining space under the
+   fixed layout; the bounded columns hold their pixel widths. No ellipsis on
+   Tags — chips wrap onto extra lines instead of being clipped. All data cells
+   render through renderRowLinkCell, so the columns live here rather than at
+   module level. */
+function buildColumns(
+    fetcher: DockerFetcherService,
+    onMutated: () => void,
+): NonNullable<TableProps<ImageSummary>['columns']> {
+    const tagsColumn: TableColumnType<ImageSummary> = {
         title: 'Tags',
-        dataIndex: 'tags',
         key: 'tags',
-        render: (tags: string[]) => renderTags(tags),
-    },
-    {
+        render: (_value: unknown, record: ImageSummary) =>
+            renderRowLinkCell(renderTags(record.tags), record, false),
+    };
+    const imageIdColumn: TableColumnType<ImageSummary> = {
         title: 'Image ID',
-        dataIndex: 'id',
         key: 'id',
         width: 140,
-        render: (id: string) => (
-            <Tooltip title={id}>
-                <Typography.Text code>{shortImageId(id)}</Typography.Text>
-            </Tooltip>
-        ),
-    },
-    {
+        render: (_value: unknown, record: ImageSummary) =>
+            renderRowLinkCell(
+                <Tooltip title={record.id}>
+                    <Typography.Text code>{shortImageId(record.id)}</Typography.Text>
+                </Tooltip>,
+                record,
+                true,
+            ),
+    };
+    const sizeColumn: TableColumnType<ImageSummary> = {
         title: 'Size',
-        dataIndex: 'sizeBytes',
         key: 'sizeBytes',
         width: 110,
-        render: (sizeBytes: number) => formatSizeBytes(sizeBytes),
-    },
-    {
+        render: (_value: unknown, record: ImageSummary) =>
+            renderRowLinkCell(formatSizeBytes(record.sizeBytes), record, false),
+    };
+    const createdColumn: TableColumnType<ImageSummary> = {
         title: 'Created',
-        dataIndex: 'createdAt',
         key: 'createdAt',
         width: 130,
-        render: (createdAt: string) => (
-            <Tooltip title={formatTimestamp(createdAt)}>{formatCreatedAt(createdAt)}</Tooltip>
-        ),
-    },
-];
-
-function buildColumns(fetcher: DockerFetcherService, onMutated: () => void): NonNullable<TableProps<ImageSummary>['columns']> {
-    return staticColumns.concat([
-        {
-            title: '',
-            key: 'actions',
-            align: 'right',
-            width: 90,
-            render: (_value: unknown, record: ImageSummary) => {
-                let primaryTag: string | null;
-                const firstTag: string | undefined = record.tags[0];
-                if (firstTag !== undefined) {
-                    primaryTag = firstTag;
-                } else {
-                    primaryTag = null;
-                }
-                return (
-                    <ImageRowActions
-                        fetcher={fetcher}
-                        imageId={record.id}
-                        primaryTag={primaryTag}
-                        onMutated={onMutated}
-                    />
-                );
-            },
+        render: (_value: unknown, record: ImageSummary) =>
+            renderRowLinkCell(
+                <Tooltip title={formatTimestamp(record.createdAt)}>{formatCreatedAt(record.createdAt)}</Tooltip>,
+                record,
+                false,
+            ),
+    };
+    const actionsColumn: TableColumnType<ImageSummary> = {
+        title: '',
+        key: 'actions',
+        align: 'right',
+        width: 90,
+        render: (_value: unknown, record: ImageSummary) => {
+            let primaryTag: string | null;
+            const firstTag: string | undefined = record.tags[0];
+            if (firstTag !== undefined) {
+                primaryTag = firstTag;
+            } else {
+                primaryTag = null;
+            }
+            return (
+                <ImageRowActions
+                    fetcher={fetcher}
+                    imageId={record.id}
+                    primaryTag={primaryTag}
+                    onMutated={onMutated}
+                />
+            );
         },
-    ]);
+    };
+    return [tagsColumn, imageIdColumn, sizeColumn, createdColumn, actionsColumn];
 }
 
 /**
@@ -163,6 +207,10 @@ function ImageList(props: ImageListProps): ReactElement {
         refreshAlert = null;
     }
 
+    function handleEmptyStateLinkClick(event: MouseEvent<HTMLElement>): void {
+        navigateOnPlainClick(event, navigate, GITHUB_WIZARD_PATH);
+    }
+
     const columns: NonNullable<TableProps<ImageSummary>['columns']> = buildColumns(props.fetcher, fetched.reload);
 
     return (
@@ -177,7 +225,14 @@ function ImageList(props: ImageListProps): ReactElement {
                 loading={fetched.isInitialLoading}
                 pagination={false}
                 locale={{
-                    emptyText: 'No platform-built images yet. Build one from a GitHub repository via New Service > GitHub Repository.',
+                    emptyText: (
+                        <>
+                            No platform-built images yet. Build one from a GitHub repository via{' '}
+                            <Typography.Link href={GITHUB_WIZARD_PATH} onClick={handleEmptyStateLinkClick}>
+                                New Service &gt; GitHub Repository
+                            </Typography.Link>.
+                        </>
+                    ),
                 }}
                 onRow={(record: ImageSummary) => ({
                     onClick: (): void => {
