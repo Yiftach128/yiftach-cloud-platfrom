@@ -7,3 +7,11 @@ export interface BuildWorkerOptions {
     /** Hard cap on a single git clone (milliseconds). */
     gitCloneTimeoutMs: number;
 }
+
+/** Identity and cadence for the heartbeat reporter. */
+export interface HeartbeatReporterOptions {
+    /** Name this builder reports itself as. */
+    agentName: string;
+    /** How often a heartbeat is sent (milliseconds). */
+    heartbeatIntervalMs: number;
+}

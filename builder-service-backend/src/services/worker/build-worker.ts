@@ -19,6 +19,7 @@ import { GitCloneService } from '../git/git-clone-service.ts';
 import { BuildJobLostError } from '../platform/build-job-lost-error.ts';
 import type { BuildTask, PortMapping } from '../platform/interfaces.ts';
 import { PlatformApiClient } from '../platform/platform-api-client.ts';
+import { HeartbeatReporter } from './heartbeat-reporter.ts';
 import type { BuildWorkerOptions } from './interfaces.ts';
 import { LogBatcher } from './log-batcher.ts';
 import { PortResolver } from './port-resolver.ts';
@@ -39,6 +40,7 @@ export class BuildWorker {
     private readonly git: GitCloneService;
     private readonly images: ImageBuilderService;
     private readonly portResolver: PortResolver;
+    private readonly heartbeats: HeartbeatReporter;
     private readonly options: BuildWorkerOptions;
     private stopRequested = false;
 
@@ -47,12 +49,14 @@ export class BuildWorker {
         git: GitCloneService,
         images: ImageBuilderService,
         portResolver: PortResolver,
+        heartbeats: HeartbeatReporter,
         options: BuildWorkerOptions,
     ) {
         this.platform = platform;
         this.git = git;
         this.images = images;
         this.portResolver = portResolver;
+        this.heartbeats = heartbeats;
         this.options = options;
     }
 
@@ -84,6 +88,7 @@ export class BuildWorker {
 
     private async processTask(task: BuildTask): Promise<void> {
         console.log(`claimed build ${task.jobId}: ${task.gitUrl} -> ${task.imageTag}`);
+        this.heartbeats.setBuilding(task.jobId);
         const batcher = new LogBatcher(this.platform, task.jobId);
         const workspace: string = await mkdtemp(join(this.options.workspaceDir, 'build-'));
 
@@ -139,6 +144,7 @@ export class BuildWorker {
             await this.reportFailure(task, batcher, error);
         } finally {
             batcher.stop();
+            this.heartbeats.setIdle();
             // The clone is never kept: success, failure, or abandon, the
             // workspace goes. Retries cover Windows's slow handle release on
             // git's read-only object files.

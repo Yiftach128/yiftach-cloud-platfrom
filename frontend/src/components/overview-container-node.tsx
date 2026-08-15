@@ -6,7 +6,7 @@ import { memo } from 'react';
 import type { CSSProperties, ReactElement } from 'react';
 import { Link } from 'react-router';
 
-import { NO_STATS_TEXT, stateTagColor } from './container-format.ts';
+import { isRunningLike, NO_STATS_TEXT, stateTagColor } from './container-format.ts';
 import OriginBadge from './origin-badge.tsx';
 import type { OverviewContainerFlowNode } from './overview-graph-builder.ts';
 
@@ -37,17 +37,30 @@ const hiddenHandleStyle: CSSProperties = {
 };
 
 function OverviewContainerNode(props: NodeProps<OverviewContainerFlowNode>): ReactElement {
-    let cpuText: string;
-    if (props.data.cpuText !== null) {
-        cpuText = props.data.cpuText;
+    /* Stopped containers never get a stats sample, so they show no stats line
+       at all; a running-like container keeps the line (dashes until the first
+       sample lands) so it doesn't pop in and out around polls. */
+    let statsLine: ReactElement | null;
+    if (isRunningLike(props.data.state)) {
+        let cpuText: string;
+        if (props.data.cpuText !== null) {
+            cpuText = props.data.cpuText;
+        } else {
+            cpuText = NO_STATS_TEXT;
+        }
+        let memoryText: string;
+        if (props.data.memoryText !== null) {
+            memoryText = props.data.memoryText;
+        } else {
+            memoryText = NO_STATS_TEXT;
+        }
+        statsLine = (
+            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                {`CPU ${cpuText} · ${memoryText}`}
+            </Typography.Text>
+        );
     } else {
-        cpuText = NO_STATS_TEXT;
-    }
-    let memoryText: string;
-    if (props.data.memoryText !== null) {
-        memoryText = props.data.memoryText;
-    } else {
-        memoryText = NO_STATS_TEXT;
+        statsLine = null;
     }
 
     let portsLine: ReactElement | null;
@@ -84,9 +97,7 @@ function OverviewContainerNode(props: NodeProps<OverviewContainerFlowNode>): Rea
                         <OriginBadge managed={props.data.managed} />
                     </Typography.Text>
                 </Flex>
-                <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                    {`CPU ${cpuText} · ${memoryText}`}
-                </Typography.Text>
+                {statsLine}
                 {portsLine}
             </Flex>
         </Link>

@@ -17,8 +17,6 @@ export * from './interfaces.ts';
 
 /** Jobs allowed to wait in the queue; enqueueing past this answers 429. */
 const MAX_QUEUED_JOBS = 10;
-/** A running job the builder has not touched for this long is declared abandoned. */
-const DEFAULT_STALE_TIMEOUT_MS = 600_000;
 /** How often the stale sweep runs. */
 const SWEEP_INTERVAL_MS = 60_000;
 
@@ -41,14 +39,10 @@ export class BuildQueueService {
     private readonly staleTimeoutMs: number;
     private sweepTimer: NodeJS.Timeout | undefined;
 
-    constructor(registry: BuildJobRegistry, daemon: DockerDaemonLifecycle, staleTimeoutMs?: number) {
+    constructor(registry: BuildJobRegistry, daemon: DockerDaemonLifecycle, staleTimeoutMs: number) {
         this.registry = registry;
         this.daemon = daemon;
-        if (staleTimeoutMs !== undefined) {
-            this.staleTimeoutMs = staleTimeoutMs;
-        } else {
-            this.staleTimeoutMs = DEFAULT_STALE_TIMEOUT_MS;
-        }
+        this.staleTimeoutMs = staleTimeoutMs;
     }
 
     /** Throws {@link BuildQueueFullError} (→ 429) when too many jobs are already waiting. */

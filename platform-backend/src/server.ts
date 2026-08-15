@@ -3,15 +3,14 @@
  * together; no logic lives here.
  */
 
-import { existsSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-
 import express from 'express';
 
+import { config } from './config/config.ts';
 import { errorHandler } from './middleware/error-handler.ts';
 import { deleteContainerLogsRoute } from './routes/delete-container-logs.ts';
 import { deleteContainerRoute } from './routes/delete-container.ts';
 import { deleteImageRoute } from './routes/delete-image.ts';
+import { getBuildAgentsRoute } from './routes/get-build-agents.ts';
 import { getBuildRoute } from './routes/get-build.ts';
 import { getContainerLogsRoute } from './routes/get-container-logs.ts';
 import { getContainerRoute } from './routes/get-container.ts';
@@ -22,6 +21,7 @@ import { getImageExposedPortsRoute } from './routes/get-image-exposed-ports.ts';
 import { getImagePresetsRoute } from './routes/get-image-presets.ts';
 import { getImageRoute } from './routes/get-image.ts';
 import { getImagesRoute } from './routes/get-images.ts';
+import { postBuildAgentsHeartbeatRoute } from './routes/post-build-agents-heartbeat.ts';
 import { postBuildRoute } from './routes/post-build.ts';
 import { postBuildsQueueClaimRoute } from './routes/post-builds-queue-claim.ts';
 import { postBuildsQueueLogsRoute } from './routes/post-builds-queue-logs.ts';
@@ -30,6 +30,7 @@ import { postContainerRestartRoute } from './routes/post-container-restart.ts';
 import { postContainerStartRoute } from './routes/post-container-start.ts';
 import { postContainerStopRoute } from './routes/post-container-stop.ts';
 import { postContainerRoute } from './routes/post-container.ts';
+import { BuildAgentRegistry } from './services/build-agents/build-agent-registry.ts';
 import { BuildJobRegistry } from './services/builds/build-job-registry.ts';
 import { BuildQueueService } from './services/builds/build-queue-service.ts';
 import { DockerImageService } from './services/docker/docker-image-service.ts';
@@ -39,45 +40,25 @@ import { ImagePresetService } from './services/images/image-preset-service.ts';
 import { bootstrapWslDocker } from './services/wsl/bootstrap-wsl-docker.ts';
 import { WslDockerHostFiles } from './services/wsl/wsl-docker-host-files.ts';
 
-// Load backend/.env (sits next to package.json, one level above src/ and dist/ alike),
-// regardless of the launch directory. Real environment variables take precedence over
-// file values; a missing .env just means defaults.
-const envFile = fileURLToPath(new URL('../.env', import.meta.url));
-if (existsSync(envFile)) {
-    process.loadEnvFile(envFile);
-}
-
-let port: number = 3000;
-const portEnv = process.env['PORT'];
-if (portEnv !== undefined) {
-    port = Number(portEnv);
-}
-
-let host: string = '127.0.0.1';
-const hostEnv = process.env['HOST'];
-if (hostEnv !== undefined) {
-    host = hostEnv;
-}
-
-// How long a running build may go silent before the sweep declares it abandoned.
-// Overridable mainly so verification can exercise the sweep quickly.
-let staleTimeoutMs: number | undefined = undefined;
-const staleTimeoutEnv = process.env['BUILD_STALE_TIMEOUT_MS'];
-if (staleTimeoutEnv !== undefined) {
-    staleTimeoutMs = Number(staleTimeoutEnv);
-}
-
-const endpoint = resolveDockerEndpoint();
-const daemon = bootstrapWslDocker(endpoint.baseUrl);
-const dockerImages = new DockerImageService({ daemon });
+const endpoint = resolveDockerEndpoint({ dockerHost: config.DOCKER_HOST });
+const wslKeepalive: boolean = config.DOCKER_WSL_KEEPALIVE !== '0';
+const daemon = bootstrapWslDocker(endpoint.baseUrl, wslKeepalive);
+const dockerImages = new DockerImageService({
+    daemon: daemon,
+    host: endpoint.host,
+    port: endpoint.port,
+});
 const docker = new DockerManagerService({
     daemon: daemon,
     hostFiles: new WslDockerHostFiles(),
     images: dockerImages,
+    host: endpoint.host,
+    port: endpoint.port,
 });
 const imagePresets = new ImagePresetService();
 const buildRegistry = new BuildJobRegistry();
-const imageBuilds = new BuildQueueService(buildRegistry, daemon, staleTimeoutMs);
+const imageBuilds = new BuildQueueService(buildRegistry, daemon, config.BUILD_STALE_TIMEOUT_MS);
+const buildAgents = new BuildAgentRegistry();
 
 const app = express();
 app.use(express.json());
@@ -102,10 +83,12 @@ app.use('/api/v1', getBuildRoute(imageBuilds));
 app.use('/api/v1', postBuildsQueueClaimRoute(imageBuilds));
 app.use('/api/v1', postBuildsQueueLogsRoute(imageBuilds));
 app.use('/api/v1', postBuildsQueueResultRoute(imageBuilds));
+app.use('/api/v1', getBuildAgentsRoute(buildAgents));
+app.use('/api/v1', postBuildAgentsHeartbeatRoute(buildAgents));
 app.use(errorHandler);
 
-const server = app.listen(port, host, () => {
-    console.log(`platform-backend listening on http://${host}:${port} -> docker at ${docker.baseUrl}`);
+const server = app.listen(config.PORT, config.HOST, () => {
+    console.log(`platform-backend listening on http://${config.HOST}:${config.PORT} -> docker at ${docker.baseUrl}`);
 });
 imageBuilds.start();
 

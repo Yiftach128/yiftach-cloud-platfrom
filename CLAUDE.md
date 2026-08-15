@@ -23,8 +23,19 @@ that performs image builds; no HTTP server). The frontend lives in `frontend/`
   npm reformats it on every install.
 - **Never put a service file directly in `src/`.** Every service lives in a domain
   folder under `src/services/` (e.g. `src/services/docker/docker-manager-service.ts`).
-  Only entry points (like `server.ts`, `main.ts`) and startup wiring (`config.ts`)
-  belong at the `src/` root.
+  Only entry points (like `server.ts`, `main.ts`) belong at the `src/` root; startup
+  wiring lives in `src/config/config.ts`.
+- **Each backend keeps its startup configuration in `src/config/config.ts`.** The
+  module loads `.env` itself at the top of the file (ESM import hoisting evaluates it
+  before any entry-point statement runs, so env must be loaded here, not in the entry
+  point), declares `export interface IConfig` in-file — a deliberate exception to the
+  types-live-in-`interfaces.ts` rule — and exports an eager
+  `export const config: IConfig = { ... }` whose UPPER_SNAKE keys mirror the env var
+  names exactly (`config.DOCKER_HOST`), resolved with the sanctioned `||` defaulting
+  (`process.env.X || 'default'`; numbers as `Number(process.env.X || '2000')`), ending
+  with `console.log('config:', config);`. Only the entry point imports it
+  (`import { config } from './config/config.ts';`) and passes values into service
+  constructors — services never read `process.env` and never import the config module.
 - **Routes are thin — one file per endpoint.** Each endpoint gets its own file in
   `src/routes/`, named `<method>-<name>.ts` (e.g. `get-containers.ts`), exporting a
   factory that takes its service dependencies and returns an Express `Router`. A route
@@ -45,7 +56,7 @@ that performs image builds; no HTTP server). The frontend lives in `frontend/`
   each value into a named local with explicit `if`/`else` first, then build the object.
   Type declarations (interfaces, unions, generics, optional `?:` properties) are not
   affected — they have no Java equivalent and stay idiomatic TypeScript.
-  Two carve-outs: `config.ts` env-resolution files may use `||` defaulting
+  Two carve-outs: `src/config/config.ts` env-resolution files may use `||` defaulting
   (`process.env.X || "default"`), and boolean logic with `||`/`&&` inside conditions
   (`if (a || b && c)`) is always fine — the ban covers truthiness *defaulting* for
   value resolution, not boolean tests.
@@ -55,8 +66,10 @@ that performs image builds; no HTTP server). The frontend lives in `frontend/`
 Express 5. A request flows route → service → dockerode; errors flow back through the
 error handler.
 
-- `src/server.ts` — composition root: loads `.env`, builds the services, mounts
-  `express.json()`, the routes under `/api/v1`, and the error handler last. No logic.
+- `src/server.ts` — composition root: imports `src/config/config.ts` (which loads
+  `.env` and logs itself — `PORT`, `HOST`, `DOCKER_HOST`, `DOCKER_WSL_KEEPALIVE`,
+  `BUILD_STALE_TIMEOUT_MS`), builds the services, mounts `express.json()`, the routes
+  under `/api/v1`, and the error handler last. No logic.
 - `src/middleware/error-handler.ts` — the only place service errors become HTTP:
   `ValidationError` and malformed JSON → 400, `DockerApiError` → its status,
   `ImagePullError`/`BuildJobNotFoundError` → 404, `LogsNotClearableError`/
@@ -96,6 +109,14 @@ error handler.
   (`BUILD_STALE_TIMEOUT_MS`) is failed by the sweeper so the UI never hangs; finished
   jobs expire after 30 minutes; a restart forgets all jobs (pollers get 404, and the
   builder abandons in-flight work on that same 404).
+- `src/services/build-agents/` — `BuildAgentRegistry`, the in-memory presence map
+  the Build Agents page reads: builders report via `POST /build-agents/heartbeat`
+  (`{name, status: idle|building, currentJobId?, startedAt}`, upserted by name,
+  always 204) and the UI lists via `GET /build-agents`. Offline is derived at list
+  time (silent past 30s → `offline`, its stale `currentJobId` dropped); records
+  silent past 30 minutes are pruned lazily inside `listAgents()` — no sweeper, so
+  no start/stop wiring in `server.ts`; a restart forgets all agents until their
+  next beat.
 - `src/services/validation/` — hand-rolled request-body validators (no schema
   library), one function per endpoint body, throwing `ValidationError` (→ 400).
   The container name/ports/env field rules live once in `parse-container-fields.ts`,
@@ -115,9 +136,12 @@ and is designed to run as a container later (its `Dockerfile` exists; a compose 
 is a future phase). One task at a time: claim → clone → build → resolve ports →
 create container → report, then poll again.
 
-- `src/main.ts` — entry point; `src/config.ts` — env-driven `Config`, logged at
-  startup (`PLATFORM_API_URL`, `DOCKER_HOST`, `POLL_INTERVAL_MS`, `WORKSPACE_DIR`,
-  `GIT_CLONE_TIMEOUT_MS`; defaults suit local dev).
+- `src/main.ts` — entry point; `src/config/config.ts` — env-driven `config`
+  (`IConfig`), loads `.env` and logs itself at import (`PLATFORM_API_URL`,
+  `DOCKER_HOST` — with `DOCKER_HOST_NAME`/`DOCKER_HOST_PORT` parsed fail-fast from
+  it — `POLL_INTERVAL_MS`, `WORKSPACE_DIR`, `GIT_CLONE_TIMEOUT_MS`, `AGENT_NAME` —
+  defaults to the machine hostname — and `HEARTBEAT_INTERVAL_MS`; defaults suit
+  local dev).
 - `src/services/platform/` — `PlatformApiClient`, the only door to the platform API
   (axios, styled after the frontend's `DockerFetcherService`; axios never leaks).
   A 404 on a job-scoped call becomes `BuildJobLostError` — the single abandon signal
@@ -143,7 +167,13 @@ create container → report, then poll again.
   `PortResolver` (when the job's container config carries no ports, resolves them
   from the built image's TCP EXPOSEs via the platform API — host = container port
   bumped past taken ports, the frontend `port-defaults.ts` policy; no TCP EXPOSE
-  publishes nothing).
+  publishes nothing), and `HeartbeatReporter` (posts the agent's presence to
+  `POST /build-agents/heartbeat` every `HEARTBEAT_INTERVAL_MS` on an unref'd timer,
+  plus an immediate beat on every idle↔building transition — `BuildWorker` calls
+  `setBuilding(jobId)` entering `processTask` and `setIdle()` in its `finally`.
+  Deliberately a dedicated call, not a claim-poll side effect, so long builds never
+  look offline; send failures are swallowed silently, matching the quiet claim
+  loop).
 
 ## Frontend architecture
 
@@ -219,6 +249,12 @@ classes; JSX files use `.tsx`).
   makes every node card inert; the managed-only Switch matches the services table. The custom node cards
   style themselves inline (square, grey) — ReactFlow is not antd, so its control
   chrome is squared in `index.css`, not via tokens.
+- The Build Agents page (`/build-agents`) is a read-only status table
+  (`components/build-agent-list.tsx`, polling `GET /build-agents` via
+  `use-fetched-data` every 5s): Name, Status (antd `Badge` — idle/building/offline,
+  the `build-progress-panel.tsx` style), Uptime (`components/agent-format.ts`'s
+  `formatUptime` from the agent's reported `startedAt`; "—" when offline), and
+  Last seen. No detail page behind the rows, so none of the row-link machinery.
 - The dev server proxies `/api` → `http://127.0.0.1:3000` (`vite.config.ts`); the backend
   deliberately has no CORS middleware, so never call the backend origin directly.
 - App-wide look and feel is set via antd `ConfigProvider` theme tokens in `main.tsx` —

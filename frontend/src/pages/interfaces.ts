@@ -23,3 +23,7 @@ export interface ImageDetailsPageProps {
 export interface OverviewPageProps {
     fetcher: DockerFetcherService;
 }
+
+export interface BuildAgentsPageProps {
+    fetcher: DockerFetcherService;
+}

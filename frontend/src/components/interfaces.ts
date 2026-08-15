@@ -3,6 +3,10 @@ import type { ReactElement } from 'react';
 import type { DockerFetcherService } from '../fetchers/docker-fetcher-service.ts';
 import type { BuildJob, ContainerState, ImagePreset, PresetEnvVar } from '../fetchers/interfaces.ts';
 
+export interface BuildAgentListProps {
+    fetcher: DockerFetcherService;
+}
+
 export interface ContainerListProps {
     fetcher: DockerFetcherService;
 }

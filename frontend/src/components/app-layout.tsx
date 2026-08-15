@@ -1,4 +1,4 @@
-import { CloudOutlined, CloudServerOutlined, CodeSandboxOutlined, DashboardOutlined, PlusOutlined } from '@ant-design/icons';
+import { CloudOutlined, CloudServerOutlined, ClusterOutlined, CodeSandboxOutlined, DashboardOutlined, PlusOutlined } from '@ant-design/icons';
 import { Divider, Layout, Menu } from 'antd';
 import type { MenuProps } from 'antd';
 import type { ReactElement } from 'react';
@@ -28,6 +28,7 @@ const navItems: NavItem[] = [
         childLabels: { database: 'Managed Service', image: 'Docker Image', github: 'GitHub Repository' },
     },
     { path: '/images', icon: <CodeSandboxOutlined />, label: 'My Images' },
+    { path: '/build-agents', icon: <ClusterOutlined />, label: 'Build Agents' },
 ];
 
 /* The Link makes each item a real anchor (new-tab friendly); antd's menu CSS

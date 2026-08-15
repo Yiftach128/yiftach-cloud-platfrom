@@ -413,3 +413,22 @@ export interface BuildJob {
     /** The failure message; present only when status is 'failed'. */
     errorMessage?: string;
 }
+
+export type BuildAgentStatus = 'idle' | 'building' | 'offline';
+
+/**
+ * One builder-service agent from GET /build-agents (mirrors
+ * platform-backend/src/services/build-agents/interfaces.ts). Presence is
+ * in-memory on the backend: a platform restart empties the list until the
+ * agents' next heartbeats.
+ */
+export interface BuildAgent {
+    name: string;
+    status: BuildAgentStatus;
+    /** ISO 8601 timestamp (a Date on the backend, serialized by JSON). Builder process start — uptime is now minus this. */
+    startedAt: string;
+    /** ISO 8601 timestamp (a Date on the backend, serialized by JSON). When the last heartbeat arrived. */
+    lastSeenAt: string;
+    /** Job the agent is building; present only while status is 'building'. */
+    currentJobId?: string;
+}

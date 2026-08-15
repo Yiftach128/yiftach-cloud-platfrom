@@ -3,6 +3,7 @@ import { BrowserRouter, Navigate, Route, Routes } from 'react-router';
 
 import AppLayout from './components/app-layout.tsx';
 import { DockerFetcherService } from './fetchers/docker-fetcher-service.ts';
+import BuildAgentsPage from './pages/build-agents-page.tsx';
 import ContainerDetailsPage from './pages/container-details-page.tsx';
 import ImageDetailsPage from './pages/image-details-page.tsx';
 import ImagesPage from './pages/images-page.tsx';
@@ -24,6 +25,7 @@ function App(): ReactElement {
                     <Route path="/images" element={<ImagesPage fetcher={dockerFetcher} />} />
                     <Route path="/images/:imageId" element={<ImageDetailsPage fetcher={dockerFetcher} />} />
                     <Route path="/overview" element={<OverviewPage fetcher={dockerFetcher} />} />
+                    <Route path="/build-agents" element={<BuildAgentsPage fetcher={dockerFetcher} />} />
                     <Route path="*" element={<Navigate to="/services" replace />} />
                 </Route>
             </Routes>

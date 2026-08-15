@@ -3,6 +3,7 @@ import type { AxiosInstance, AxiosResponse } from 'axios';
 
 import { DockerFetcherError } from './docker-fetcher-error.ts';
 import type {
+    BuildAgent,
     BuildJob,
     Container,
     ContainerDetails,
@@ -146,6 +147,16 @@ export class DockerFetcherService {
         try {
             const encodedId: string = encodeURIComponent(id);
             const response: AxiosResponse<BuildJob> = await this.http.get(`/builds/${encodedId}`);
+            return response.data;
+        } catch (error) {
+            throw this.toFetcherError(error);
+        }
+    }
+
+    /** The builder agents known to the platform, recently-offline ones included (in-memory — a platform restart empties it). */
+    public async getBuildAgents(): Promise<BuildAgent[]> {
+        try {
+            const response: AxiosResponse<BuildAgent[]> = await this.http.get('/build-agents');
             return response.data;
         } catch (error) {
             throw this.toFetcherError(error);

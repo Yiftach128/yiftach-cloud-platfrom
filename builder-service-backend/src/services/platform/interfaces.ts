@@ -70,3 +70,14 @@ export interface ContainerPortBinding {
 export interface ContainerSummary {
     ports: ContainerPortBinding[];
 }
+
+/** Body of POST /build-agents/heartbeat (mirrors AgentHeartbeatReport; Date → ISO string). */
+export interface AgentHeartbeatRequest {
+    /** Agent identity; heartbeats upsert by this name on the platform. */
+    name: string;
+    status: 'idle' | 'building';
+    /** Job the agent is working on; present only while status is 'building'. */
+    currentJobId?: string;
+    /** ISO 8601 — when the builder process started, so the UI can show uptime. */
+    startedAt: string;
+}

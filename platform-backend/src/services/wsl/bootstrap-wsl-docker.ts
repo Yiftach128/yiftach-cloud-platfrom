@@ -8,12 +8,12 @@ import { WslDockerDaemon } from './wsl-docker-daemon.ts';
 
 /**
  * @param baseUrl Daemon base URL, e.g. "http://127.0.0.1:2375".
- * Reads DOCKER_WSL_KEEPALIVE ("0" disables holding the distro open).
+ * @param keepalive Hold the distro open while the server runs (false disables it).
  */
-export function bootstrapWslDocker(baseUrl: string): WslDockerDaemon {
+export function bootstrapWslDocker(baseUrl: string, keepalive: boolean): WslDockerDaemon {
     const daemon = new WslDockerDaemon({
         pingUrl: `${baseUrl}/_ping`,
-        keepalive: process.env['DOCKER_WSL_KEEPALIVE'] !== '0',
+        keepalive: keepalive,
     });
 
     // Warm in the background so the first request doesn't pay the WSL boot;

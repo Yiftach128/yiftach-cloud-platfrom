@@ -11,6 +11,7 @@ import type { AxiosInstance, AxiosResponse } from 'axios';
 
 import { BuildJobLostError } from './build-job-lost-error.ts';
 import type {
+    AgentHeartbeatRequest,
     BuildResultReport,
     BuildTask,
     ContainerSummary,
@@ -39,6 +40,15 @@ export class PlatformApiClient {
                 return null;
             }
             return response.data;
+        } catch (error) {
+            throw this.toApiError(error);
+        }
+    }
+
+    /** Reports the agent's liveness and status. Best-effort — the heartbeat reporter swallows failures. */
+    public async sendAgentHeartbeat(heartbeat: AgentHeartbeatRequest): Promise<void> {
+        try {
+            await this.http.post('/build-agents/heartbeat', heartbeat);
         } catch (error) {
             throw this.toApiError(error);
         }

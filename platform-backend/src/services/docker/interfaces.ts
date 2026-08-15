@@ -228,6 +228,17 @@ export interface DockerEndpoint {
     baseUrl: string;
 }
 
+/** Options for resolveDockerEndpoint. Explicit host/port win over the dockerHost string. */
+export interface ResolveDockerEndpointOptions
+    extends Pick<DockerManagerOptions, 'host' | 'port' | 'protocol' | 'ca' | 'cert' | 'key'> {
+    /**
+     * Docker CLI style endpoint (e.g. "tcp://127.0.0.1:2375"), consulted when
+     * host/port are not given. Malformed values are ignored rather than thrown,
+     * so a stray value can't break startup.
+     */
+    dockerHost?: string;
+}
+
 /**
  * The slice of a daemon lifecycle the manager depends on — kept as an interface so
  * the manager never imports a concrete (platform-specific) implementation. The WSL
@@ -260,9 +271,9 @@ export interface DockerImageProvider {
 }
 
 export interface DockerManagerOptions {
-    /** Defaults to DOCKER_HOST, else 127.0.0.1. */
+    /** Defaults to 127.0.0.1; the composition root passes the configured endpoint. */
     host?: string;
-    /** Defaults to DOCKER_HOST, else 2375. */
+    /** Defaults to 2375; the composition root passes the configured endpoint. */
     port?: number;
     /** Defaults to https when TLS material is supplied, otherwise http. */
     protocol?: 'http' | 'https';
@@ -303,9 +314,9 @@ export interface DockerManagerOptions {
  * transfers are caught by the progress stream's idle watchdog instead).
  */
 export interface DockerImageServiceOptions {
-    /** Defaults to DOCKER_HOST, else 127.0.0.1. */
+    /** Defaults to 127.0.0.1; the composition root passes the configured endpoint. */
     host?: string;
-    /** Defaults to DOCKER_HOST, else 2375. */
+    /** Defaults to 2375; the composition root passes the configured endpoint. */
     port?: number;
     /** Defaults to https when TLS material is supplied, otherwise http. */
     protocol?: 'http' | 'https';
