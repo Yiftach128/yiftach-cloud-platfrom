@@ -45,7 +45,7 @@ function renderLastSeen(agent: BuildAgent): ReactElement {
    onClick, and the columns can live at module level. The width-less Name
    column absorbs the remaining space under the fixed layout. */
 const nameColumn: TableColumnType<BuildAgent> = {
-    title: 'Name',
+    title: 'Host name',
     key: 'name',
     dataIndex: 'name',
 };
