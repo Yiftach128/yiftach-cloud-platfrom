@@ -4,7 +4,7 @@ YCP is a self-hosted cloud control panel for deploying and managing Docker conta
 
 ![Yiftach Cloud Platform demo](public/gif/gif-final.gif)
 
-User can order services from a ready-made preset (mongoDB, postgres, redis, etc...), any Docker image, or a GitHub repository — and the platform turns it into a running container you can watch, manage, and inspect from the browser. Everything runs locally on Windows, with the Docker daemon living inside WSL2.
+User can add new services from a ready-made preset (mongoDB, postgres, redis, etc...), any Docker image, or a GitHub repository — and the platform turns it into a running container you can watch, manage, and inspect from the browser. Everything runs locally on Windows, with the Docker daemon living inside WSL2.
 
 The project is split into three standalone packages: a platform backend (with REST API), build agents (microservices that do the image builds from GitHub repos), and a React frontend.
 
